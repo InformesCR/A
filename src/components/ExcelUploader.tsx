@@ -1,13 +1,10 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { db, normalizeText, auth } from '../lib/firebase';
+import { db, normalizeText } from '../lib/firebase';
 import { collection, writeBatch, doc } from 'firebase/firestore';
-import { signInWithPopup, GoogleAuthProvider, signOut, User, signInWithRedirect } from 'firebase/auth';
 import { KardexRecord } from '../types';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, LogOut, ShieldAlert, ArrowLeft } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react';
 import { motion } from 'motion/react';
-
-const ADMIN_EMAIL = 'alexa.calderon@itdurango.edu.mx';
 
 interface Props {
   onBack?: () => void;
@@ -17,32 +14,6 @@ export default function ExcelUploader({ onBack }: Props) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((u) => {
-      setUser(u);
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const handleLogin = async () => {
-    try {
-      const provider = new GoogleAuthProvider();
-      // Use redirect as popup might be blocked
-      await signInWithRedirect(auth, provider);
-    } catch (error) {
-      console.error("Login failed", error);
-      setStatus({ type: 'error', message: 'Error al iniciar sesión. Verifica si la ventana emergente está bloqueada o abre la app en otra pestaña.' });
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOut(auth);
-  };
 
   const clearDatabase = async () => {
     if (!window.confirm("¿Está seguro que desea borrar TODOS los registros de la base de datos? Esta acción no se puede deshacer.")) return;
@@ -113,6 +84,8 @@ export default function ExcelUploader({ onBack }: Props) {
           const keys = {
             folio: findKey(data[0], ['folio', 'informe', 'no', 'num', 'id', 'a.']),
             tipo: findKey(data[0], ['tipo de curso', 'c.']),
+            mes: findKey(data[0], ['mes']),
+            year: findKey(data[0], ['año', 'ano']),
             instructorKeys: Object.keys(data[0]).filter(k => {
               const nk = normalizeText(k);
               return nk === 'ec' || nk === 'ed' || nk === 'ee' || nk.includes('instructor');
@@ -134,9 +107,28 @@ export default function ExcelUploader({ onBack }: Props) {
               const names = keys.instructorKeys.map(k => String(row[k] || '').trim()).filter(n => n.length > 2);
               if (names.length > 0) instructor = names.join(', ');
             }
+            
+            let m = '??';
+            let y = '????';
+            
+            if (keys.mes && row[keys.mes]) {
+                const rMonth = row[keys.mes];
+                if (rMonth instanceof Date) m = String(rMonth.getMonth() + 1);
+                else m = String(rMonth).trim().padStart(2, '0').replace(/^0+/, '');
+            }
+            if (keys.year && row[keys.year]) {
+                const rYear = row[keys.year];
+                if (rYear instanceof Date) y = String(rYear.getFullYear());
+                else y = String(rYear).trim().split('-')[0];
+            }
+            
+            let date = existing.date;
+            if (m !== '??' || y !== '????') {
+                date = `${m}-${y}`;
+            }
 
             genDataMap.set(fStr, {
-              date: existing.date,
+              date: date !== 'N/A' ? date : existing.date,
               section: existing.section,
               tipoCurso: String(tipoCurso),
               instructor: String(instructor)
@@ -192,19 +184,42 @@ export default function ExcelUploader({ onBack }: Props) {
             
             let m = '??';
             let y = '????';
+            
+            // First try to use genData date if available
+            if (finalDate !== 'N/A') {
+               const parts = finalDate.split('-');
+               if (parts.length === 2) {
+                 m = parts[0];
+                 y = parts[1];
+               }
+            }
+
+            // Override with current row's date if available
             if (rMonth || rYear) {
               if (rMonth instanceof Date) m = String(rMonth.getMonth() + 1);
               else if (rMonth) m = String(rMonth).trim().padStart(2, '0').replace(/^0+/, '');
               
               if (rYear instanceof Date) y = String(rYear.getFullYear());
               else if (rYear) y = String(rYear).trim().split('-')[0];
-              
-              if (m !== '??' || y !== '????') finalDate = `${m}-${y}`;
+            } else if (y === '????') {
+              // Try to extract year from folio (e.g. DGO-DGO-24-047 -> 24 -> 2024)
+              const parts = folio.trim().toUpperCase().split('-');
+              if (parts.length >= 3) {
+                 const yearPart = parts[2];
+                 if (yearPart.length === 2 && !isNaN(Number(yearPart))) {
+                   y = `20${yearPart}`;
+                 }
+              }
+            }
+
+            if (m !== '??' || y !== '????') {
+              finalDate = `${m}-${y}`;
             }
 
             const searchKeywords = [
               ...normalizeText(fullName).split(/\s+/),
-              fStr.toLowerCase()
+              fStr.toLowerCase(),
+              folio.trim().toLowerCase()
             ];
             if (y !== '????') searchKeywords.push(y);
             if (m !== '??' && y !== '????') searchKeywords.push(`${m}-${y}`);
@@ -273,81 +288,6 @@ export default function ExcelUploader({ onBack }: Props) {
     }
   }, []);
 
-  if (authLoading) {
-    return (
-      <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100 flex flex-col items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 text-[#E21F26] animate-spin" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-100 text-center flex flex-col items-center">
-        <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6">
-          <ShieldAlert className="w-10 h-10 text-[#E21F26]" />
-        </div>
-        <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Acceso Restringido</h2>
-        <p className="text-slate-500 mb-8 max-w-md text-lg">Para acceder al módulo de carga masiva, por favor inicie sesión con su cuenta institucional.</p>
-        
-        {status && status.type === 'error' && (
-          <div className="mb-6 bg-rose-50 border border-rose-100 text-rose-700 p-4 rounded-xl text-sm max-w-md">
-            {status.message}
-          </div>
-        )}
-
-        <div className="flex flex-col sm:flex-row gap-4">
-          {onBack && (
-            <button
-              onClick={onBack}
-              className="px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-3 uppercase tracking-wide text-sm"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              Volver al Inicio
-            </button>
-          )}
-          <button
-            onClick={handleLogin}
-            className="px-8 py-4 bg-[#E21F26] hover:bg-[#c41a21] text-white font-black rounded-2xl shadow-lg shadow-red-200 transition-all active:scale-95 flex items-center justify-center gap-3 uppercase tracking-wide text-sm"
-          >
-            Iniciar Sesión
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (user.email !== ADMIN_EMAIL) {
-    return (
-      <div className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-100 text-center flex flex-col items-center">
-        <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mb-6">
-          <AlertCircle className="w-10 h-10 text-amber-500" />
-        </div>
-        <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Usuario No Autorizado</h2>
-        <p className="text-slate-500 mb-8 max-w-md text-lg">La cuenta <span className="font-bold text-slate-700">{user.email}</span> no cuenta con los permisos de administrador necesarios.</p>
-        
-        <div className="flex flex-col sm:flex-row gap-4">
-          {onBack && (
-            <button
-              onClick={onBack}
-              className="px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2 text-sm uppercase tracking-wide"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Volver al Inicio
-            </button>
-          )}
-          <button
-            onClick={handleLogout}
-            className="px-6 py-4 bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-600 font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2 text-sm uppercase tracking-wide"
-          >
-            <LogOut className="w-4 h-4" />
-            Cerrar Sesión
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
       <div className="flex flex-col md:flex-row items-center gap-4 mb-8">
@@ -377,14 +317,6 @@ export default function ExcelUploader({ onBack }: Props) {
           >
             <AlertCircle className="w-5 h-5" />
             <span className="text-xs font-bold uppercase hidden md:inline">Limpiar DB</span>
-          </button>
-          <button 
-            onClick={handleLogout}
-            className="flex-1 md:flex-none justify-center p-4 bg-rose-50 hover:bg-rose-100 text-[#E21F26] rounded-2xl transition-all flex items-center gap-2"
-            title="Cerrar sesión"
-          >
-            <LogOut className="w-5 h-5" />
-            <span className="text-xs font-bold uppercase hidden md:inline">Salir</span>
           </button>
         </div>
       </div>

@@ -1,16 +1,79 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ExcelUploader from './components/ExcelUploader';
 import KardexSearch from './components/KardexSearch';
 import KardexResults from './components/KardexResults';
 import { KardexRecord } from './types';
-import { Search, LayoutDashboard, HeartPulse, ShieldCheck, FileText, Database } from 'lucide-react';
+import { Search, LayoutDashboard, HeartPulse, ShieldCheck, FileText, Database, LogIn, LogOut, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { auth } from './lib/firebase';
+import { signInWithRedirect, GoogleAuthProvider, signOut, User } from 'firebase/auth';
+
+const ADMIN_EMAIL = 'alexa.calderon@itdurango.edu.mx';
 
 export default function App() {
   const [results, setResults] = useState<KardexRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [view, setView] = useState<'search' | 'upload'>('search');
+  
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((u) => {
+      setUser(u);
+      if (u && u.email === ADMIN_EMAIL) {
+        setView('upload');
+      } else if (u) {
+        setView('search');
+      }
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    await signInWithRedirect(auth, provider);
+  };
+
+  const lgOut = async () => {
+    await signOut(auth);
+    setView('search');
+    setResults([]);
+    setSearched(false);
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center">
+        <Loader2 className="w-12 h-12 text-[#E21F26] animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center font-sans p-6">
+        <div className="bg-white p-12 rounded-[3rem] shadow-xl border border-slate-100 text-center max-w-xl w-full">
+          <div className="w-24 h-24 bg-red-50 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-inner">
+            <HeartPulse className="w-12 h-12 text-[#E21F26]" />
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">Kardex Cruz Roja</h1>
+          <p className="text-slate-500 mb-10 text-lg">Inicie sesión con su cuenta de Google para acceder al sistema de consultas e instructores de la Delegación Durango.</p>
+          <button
+            onClick={handleLogin}
+            className="w-full py-5 bg-[#E21F26] hover:bg-[#c41a21] text-white font-black rounded-2xl shadow-xl shadow-red-200 transition-all active:scale-95 flex items-center justify-center gap-3 uppercase tracking-wide text-sm"
+          >
+            <LogIn className="w-5 h-5" />
+            Iniciar Sesión con Google
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const isAdmin = user.email === ADMIN_EMAIL;
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] pb-20 font-sans">
@@ -29,29 +92,43 @@ export default function App() {
               </h1>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black bg-red-50 text-[#E21F26] px-2 py-0.5 rounded-full border border-red-100">DURANGO</span>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">SISTEMA DE KARDEX E INSTRUCTORES</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden md:block">SISTEMA DE KARDEX</p>
               </div>
             </div>
           </div>
 
-          <nav className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
-            <button
-              onClick={() => setView('search')}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black transition-all ${view === 'search' ? 'bg-white text-[#E21F26] shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
+          <div className="flex items-center gap-4">
+            <nav className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
+              <button
+                onClick={() => setView('search')}
+                className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-[10px] md:text-xs font-black transition-all ${view === 'search' ? 'bg-white text-[#E21F26] shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <Search className="w-4 h-4" />
+                <span className="hidden sm:inline">CONSULTAR REGISTROS</span>
+                <span className="sm:hidden">CONSULTA</span>
+              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setView('upload')}
+                  className={`flex items-center gap-2 px-4 md:px-6 py-2.5 rounded-xl text-[10px] md:text-xs font-black transition-all ${view === 'upload' ? 'bg-white text-[#E21F26] shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  <LayoutDashboard className="w-4 h-4" />
+                  <span className="hidden sm:inline">CARGA MASIVA</span>
+                  <span className="sm:hidden">CARGA</span>
+                </button>
+              )}
+            </nav>
+            <button 
+              onClick={lgOut}
+              className="p-3 bg-rose-50 hover:bg-rose-100 text-[#E21F26] rounded-xl transition-all"
+              title="Cerrar sesión"
             >
-              <Search className="w-4 h-4" />
-              CONSULTAR REGISTROS
+              <LogOut className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => setView('upload')}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-xs font-black transition-all ${view === 'upload' ? 'bg-white text-[#E21F26] shadow-md' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              CARGA MASIVA
-            </button>
-          </nav>
+          </div>
         </div>
       </header>
+
 
       <main className="max-w-7xl mx-auto px-6 pt-10">
         <AnimatePresence mode="wait">
