@@ -1,0 +1,13 @@
+# Dependencies
+node_modules
+dist
+.env
+.env.local
+
+# Firebase Config (DO NOT SHARE)
+firebase-applet-config.json
+firebase-blueprint.json
+
+# IDE
+.vscode
+.idea
