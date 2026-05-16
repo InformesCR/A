@@ -1,15 +1,43 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { db, normalizeText } from '../lib/firebase';
+import { db, normalizeText, auth } from '../lib/firebase';
 import { collection, writeBatch, doc } from 'firebase/firestore';
+import { signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 import { KardexRecord } from '../types';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, LogOut, ShieldAlert } from 'lucide-react';
 import { motion } from 'motion/react';
+
+const ADMIN_EMAIL = 'alexa.calderon@itdurango.edu.mx';
 
 export default function ExcelUploader() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Login failed", error);
+      setStatus({ type: 'error', message: 'Error al iniciar sesión.' });
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
 
   const onFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -195,16 +223,70 @@ export default function ExcelUploader() {
     }
   }, []);
 
+  if (authLoading) {
+    return (
+      <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100 flex flex-col items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-[#E21F26] animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-100 text-center flex flex-col items-center">
+        <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6">
+          <ShieldAlert className="w-10 h-10 text-[#E21F26]" />
+        </div>
+        <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Acceso Restringido</h2>
+        <p className="text-slate-500 mb-8 max-w-md text-lg">Para acceder al módulo de carga masiva, por favor inicie sesión con su cuenta institucional.</p>
+        <button
+          onClick={handleLogin}
+          className="px-8 py-4 bg-[#E21F26] hover:bg-[#c41a21] text-white font-black rounded-2xl shadow-lg shadow-red-200 transition-all active:scale-95 flex items-center gap-3 uppercase tracking-wide text-sm"
+        >
+          <LogOut className="w-5 h-5 -scale-x-100" />
+          Iniciar Sesión
+        </button>
+      </div>
+    );
+  }
+
+  if (user.email !== ADMIN_EMAIL) {
+    return (
+      <div className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-100 text-center flex flex-col items-center">
+        <div className="w-20 h-20 bg-amber-50 rounded-full flex items-center justify-center mb-6">
+          <AlertCircle className="w-10 h-10 text-amber-500" />
+        </div>
+        <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Usuario No Autorizado</h2>
+        <p className="text-slate-500 mb-8 max-w-md text-lg">La cuenta <span className="font-bold text-slate-700">{user.email}</span> no cuenta con los permisos de administrador necesarios.</p>
+        <button
+          onClick={handleLogout}
+          className="px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-2xl transition-all active:scale-95 flex items-center gap-2 text-sm uppercase tracking-wide"
+        >
+          <LogOut className="w-4 h-4" />
+          Cerrar Sesión
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-200">
-      <div className="flex items-center gap-4 mb-6">
-        <div className="p-3 bg-indigo-100 rounded-2xl">
-          <FileSpreadsheet className="w-8 h-8 text-indigo-600" />
+    <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
+      <div className="flex items-center gap-4 mb-8">
+        <div className="p-4 bg-red-50 rounded-2xl">
+          <FileSpreadsheet className="w-8 h-8 text-[#E21F26]" />
         </div>
-        <div>
-          <h2 className="text-2xl font-black text-slate-800">Cargar Base de Datos</h2>
-          <p className="text-slate-500 text-sm">Sube tus archivos Excel para actualizar el Kardex</p>
+        <div className="flex-1">
+          <h2 className="text-2xl font-black text-slate-900">Módulo de Carga</h2>
+          <p className="text-slate-500 text-sm font-medium mt-1">Sube archivos Excel (.xls, .xlsx) para sincronizar registros</p>
         </div>
+        <button 
+          onClick={handleLogout}
+          className="p-4 bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-[#E21F26] rounded-2xl transition-all flex items-center gap-2"
+          title="Cerrar sesión"
+        >
+          <LogOut className="w-5 h-5" />
+          <span className="text-xs font-bold uppercase hidden md:inline">Salir</span>
+        </button>
       </div>
 
       <div className="relative group">
@@ -216,30 +298,30 @@ export default function ExcelUploader() {
           disabled={loading}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
         />
-        <div className={`border-2 border-dashed rounded-3xl p-10 flex flex-col items-center justify-center transition-all ${loading ? 'bg-slate-50 border-slate-200' : 'border-slate-200 group-hover:border-indigo-400 group-hover:bg-indigo-50/30'}`}>
+        <div className={`border-2 border-dashed rounded-[2rem] p-12 flex flex-col items-center justify-center transition-all ${loading ? 'bg-slate-50 border-slate-200' : 'border-slate-300 group-hover:border-[#E21F26] group-hover:bg-red-50/50'}`}>
           {loading ? (
-            <div className="flex flex-col items-center">
-              <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
+            <div className="flex flex-col items-center w-full">
+              <Loader2 className="w-12 h-12 text-[#E21F26] animate-spin mb-6" />
               {progress.total > 0 && (
-                <div className="w-full max-w-xs bg-slate-200 rounded-full h-2 mb-2 overflow-hidden">
+                <div className="w-full max-w-sm bg-slate-100 rounded-full h-3 mb-3 overflow-hidden shadow-inner">
                   <div 
-                    className="bg-indigo-600 h-full transition-all duration-300" 
+                    className="bg-[#E21F26] h-full transition-all duration-300 rounded-full" 
                     style={{ width: `${(progress.current / progress.total) * 100}%` }}
                   />
                 </div>
               )}
             </div>
           ) : (
-            <Upload className="w-12 h-12 text-slate-400 group-hover:text-indigo-500 mb-4 transition-colors" />
+            <Upload className="w-14 h-14 text-slate-300 group-hover:text-[#E21F26] mb-4 transition-colors group-hover:scale-110 duration-300" />
           )}
-          <p className="font-bold text-slate-600 text-center">
+          <p className="font-bold text-slate-700 text-lg text-center">
             {loading 
               ? progress.total > 0 
-                ? `Cargando: ${progress.current} de ${progress.total} registros...`
-                : 'Procesando archivo...'
-              : 'Selecciona o arrastra el archivo Excel'}
+                ? `Procesando: ${progress.current} / ${progress.total} registros...`
+                : 'Analizando archivos...'
+              : 'Selecciona o arrastra archivos Excel aquí'}
           </p>
-          <p className="text-xs text-slate-400 mt-2">Formatos aceptados: .xlsx, .xls</p>
+          <p className="text-sm text-slate-400 mt-2 font-medium">Archivos compatibles: .xlsx y .xls</p>
         </div>
       </div>
 

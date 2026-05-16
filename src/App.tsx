@@ -3,7 +3,7 @@ import ExcelUploader from './components/ExcelUploader';
 import KardexSearch from './components/KardexSearch';
 import KardexResults from './components/KardexResults';
 import { KardexRecord } from './types';
-import { Search, LayoutDashboard, HeartPulse, ShieldCheck, FileText } from 'lucide-react';
+import { Search, LayoutDashboard, HeartPulse, ShieldCheck, FileText, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
