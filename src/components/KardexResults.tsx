@@ -155,7 +155,7 @@ export default function KardexResults({ results, loading, searched }: Props) {
         </div>
         <button 
           onClick={() => setShowConfig(!showConfig)}
-          className={`ml-4 p-4 rounded-3xl border transition-all flex flex-col items-center justify-center ${showConfig ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'}`}
+          className={`ml-4 p-4 rounded-3xl border transition-all flex flex-col items-center justify-center ${showConfig ? 'bg-[#E21F26] border-[#E21F26] text-white shadow-lg shadow-red-100' : 'bg-white border-slate-200 text-slate-600 hover:border-red-300 hover:bg-red-50/30'}`}
         >
           <Settings2 className="w-6 h-6 mb-1" />
           <span className="text-[10px] font-black uppercase">Columnas</span>
@@ -170,14 +170,14 @@ export default function KardexResults({ results, loading, searched }: Props) {
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="bg-white p-6 rounded-3xl border border-indigo-100 shadow-sm">
+            <div className="bg-white p-6 rounded-[2rem] border border-red-50 shadow-sm">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Seleccionar Datos a Mostrar</p>
               <div className="flex flex-wrap gap-2">
                 {COLUMN_OPTIONS.map(opt => (
                   <button
                     key={opt.key}
                     onClick={() => toggleColumn(opt.key)}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${visibleColumns.includes(opt.key) ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${visibleColumns.includes(opt.key) ? 'bg-red-50 border-red-100 text-[#E21F26] shadow-sm' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200'}`}
                   >
                     {visibleColumns.includes(opt.key) && <Check className="w-3 h-3 inline-block mr-1" />}
                     {opt.label}

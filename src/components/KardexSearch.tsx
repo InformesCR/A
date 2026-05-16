@@ -54,24 +54,30 @@ export default function KardexSearch({ onResults, setLoading, setSearched }: Pro
   };
 
   return (
-    <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-200">
-      <h2 className="text-2xl font-black text-slate-800 mb-6">Consulta de Kardex</h2>
-      <form onSubmit={handleSearch} className="flex gap-4">
+    <div className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-slate-200/50 border border-slate-100">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-8 h-8 bg-red-50 rounded-lg flex items-center justify-center">
+          <Search className="text-[#E21F26] w-5 h-5" />
+        </div>
+        <h2 className="text-xl font-black text-slate-800 tracking-tight">Panel de Búsqueda</h2>
+      </div>
+      <form onSubmit={handleSearch} className="flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+          <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por Nombre o Folio..."
-            className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium transition-all"
+            placeholder="Ingrese Nombre del Alumno o Folio de Consulta..."
+            className="w-full pl-14 pr-6 py-5 bg-slate-50 border-2 border-slate-50 rounded-2xl focus:outline-none focus:border-red-100 focus:bg-white focus:ring-4 focus:ring-red-50/50 font-bold text-slate-700 placeholder:text-slate-400 transition-all text-lg"
           />
         </div>
         <button
           type="submit"
-          className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-lg shadow-indigo-200 transition-all active:scale-95"
+          className="px-10 py-5 bg-[#E21F26] hover:bg-[#c41a21] text-white font-black rounded-2xl shadow-xl shadow-red-200 transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-wider"
         >
-          BUSCAR
+          <Search className="w-5 h-5" />
+          Realizar Búsqueda
         </button>
       </form>
     </div>
