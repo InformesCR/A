@@ -49,10 +49,20 @@ export default function KardexSearch({ onResults, setLoading, setSearched }: Pro
           where('searchKeywords', 'array-contains', keywords[0]),
           limit(300)
         );
+      } else if (selectedYear && selectedMonth) {
+        q = query(
+          collection(db, 'kardex'),
+          where('searchKeywords', 'array-contains', `${selectedMonth}-${selectedYear}`),
+          limit(500)
+        );
+      } else if (selectedYear) {
+        q = query(
+          collection(db, 'kardex'),
+          where('searchKeywords', 'array-contains', selectedYear),
+          limit(500)
+        );
       } else {
-        // If no keyword, but year selected, fetch limit 2000 to search through more records
-        // since we are filtering locally.
-        q = query(collection(db, 'kardex'), limit(2000));
+        q = query(collection(db, 'kardex'), limit(500));
       }
 
       const querySnapshot = await getDocs(q);

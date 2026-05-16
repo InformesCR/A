@@ -32,15 +32,52 @@ export default function ExcelUploader({ onBack }: Props) {
   const handleLogin = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      // Use redirect as popup might be blocked
+      await signInWithRedirect(auth, provider);
     } catch (error) {
       console.error("Login failed", error);
-      setStatus({ type: 'error', message: 'Error al iniciar sesión. Intenta abrir la aplicación en una nueva pestaña usando el botón en la esquina superior derecha o verifica si la ventana emergente está bloqueada.' });
+      setStatus({ type: 'error', message: 'Error al iniciar sesión. Verifica si la ventana emergente está bloqueada o abre la app en otra pestaña.' });
     }
   };
 
   const handleLogout = async () => {
     await signOut(auth);
+  };
+
+  const clearDatabase = async () => {
+    if (!window.confirm("¿Está seguro que desea borrar TODOS los registros de la base de datos? Esta acción no se puede deshacer.")) return;
+    
+    setLoading(true);
+    setStatus(null);
+    try {
+      const { getDocs, query } = await import('firebase/firestore');
+      const q = query(collection(db, 'kardex'));
+      const snapshot = await getDocs(q);
+      
+      let deleted = 0;
+      const BATCH_SIZE = 450;
+      let batch = writeBatch(db);
+      
+      for (const docSnapshot of snapshot.docs) {
+        batch.delete(docSnapshot.ref);
+        deleted++;
+        
+        if (deleted % BATCH_SIZE === 0) {
+          await batch.commit();
+          batch = writeBatch(db);
+        }
+      }
+      if (deleted % BATCH_SIZE !== 0) {
+        await batch.commit();
+      }
+      
+      setStatus({ type: 'success', message: `Se borraron ${deleted} registros de la base de datos exitosamente.` });
+    } catch (error) {
+      console.error(error);
+      setStatus({ type: 'error', message: 'Error al borrar la base de datos.' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -213,7 +250,12 @@ export default function ExcelUploader({ onBack }: Props) {
         const chunk = totalRecordsToUpload.slice(i, i + BATCH_SIZE);
         
         chunk.forEach((record) => {
-          const docRef = doc(collection(db, 'kardex'));
+          // Create a deterministic ID to avoid duplicates
+          const rawId = `${record.folio}-${record.userName}-${record.courseName}-${record.date}`;
+          const safeId = normalizeText(rawId).replace(/[^a-zA-Z0-9]/g, '');
+          const finalId = safeId.length > 50 ? safeId.substring(0, 50) : safeId;
+          
+          const docRef = doc(db, 'kardex', finalId);
           batch.set(docRef, record);
         });
 
@@ -327,6 +369,15 @@ export default function ExcelUploader({ onBack }: Props) {
               <span className="text-xs font-bold uppercase hidden md:inline">Volver</span>
             </button>
           )}
+          <button 
+            onClick={clearDatabase}
+            disabled={loading}
+            className="flex-1 md:flex-none justify-center p-4 bg-orange-50 hover:bg-orange-100 text-orange-600 rounded-2xl transition-all flex items-center gap-2 disabled:opacity-50"
+            title="Limpiar Base de Datos"
+          >
+            <AlertCircle className="w-5 h-5" />
+            <span className="text-xs font-bold uppercase hidden md:inline">Limpiar DB</span>
+          </button>
           <button 
             onClick={handleLogout}
             className="flex-1 md:flex-none justify-center p-4 bg-rose-50 hover:bg-rose-100 text-[#E21F26] rounded-2xl transition-all flex items-center gap-2"
