@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "KardexRecord": {
+      "title": "Kardex Record",
+      "description": "Record of a student course result",
+      "type": "object",
+      "properties": {
+        "userName": { "type": "string" },
+        "folio": { "type": "string" },
+        "courseName": { "type": "string" },
+        "grade": { "type": "string" },
+        "section": { "type": "string" },
+        "date": { "type": "string" },
+        "curp": { "type": "string" },
+        "sexo": { "type": "string" },
+        "edad": { "type": "string" },
+        "fechaNacimiento": { "type": "string" },
+        "semestre": { "type": "string" },
+        "aprobo": { "type": "string" },
+        "folioConstancia": { "type": "string" },
+        "numInterno": { "type": "string" },
+        "nombrePreferencia": { "type": "string" },
+        "tipoCurso": { "type": "string" },
+        "instructor": { "type": "string" },
+        "searchKeywords": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "uploadedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userName", "folio", "courseName", "searchKeywords"]
+    }
+  },
+  "firestore": {
+    "kardex": {
+      "schema": "KardexRecord",
+      "description": "Collection of all kardex records"
+    }
+  }
+}
