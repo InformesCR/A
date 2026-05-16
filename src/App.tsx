@@ -67,7 +67,7 @@ export default function App() {
                 <h2 className="text-3xl font-black text-slate-900">Módulo de Carga Masiva</h2>
                 <p className="text-slate-400 font-medium mt-2">Sincroniza múltiples archivos Excel de instructores y cursos</p>
               </div>
-              <ExcelUploader />
+              <ExcelUploader onBack={() => setView('search')} />
               
               <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="p-6 bg-white rounded-3xl border border-slate-200">

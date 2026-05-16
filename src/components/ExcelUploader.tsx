@@ -2,14 +2,18 @@ import React, { useCallback, useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { db, normalizeText, auth } from '../lib/firebase';
 import { collection, writeBatch, doc } from 'firebase/firestore';
-import { signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, signOut, User, signInWithRedirect } from 'firebase/auth';
 import { KardexRecord } from '../types';
-import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, LogOut, ShieldAlert } from 'lucide-react';
+import { Upload, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, LogOut, ShieldAlert, ArrowLeft } from 'lucide-react';
 import { motion } from 'motion/react';
 
 const ADMIN_EMAIL = 'alexa.calderon@itdurango.edu.mx';
 
-export default function ExcelUploader() {
+interface Props {
+  onBack?: () => void;
+}
+
+export default function ExcelUploader({ onBack }: Props) {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -31,7 +35,7 @@ export default function ExcelUploader() {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error("Login failed", error);
-      setStatus({ type: 'error', message: 'Error al iniciar sesión.' });
+      setStatus({ type: 'error', message: 'Error al iniciar sesión. Intenta abrir la aplicación en una nueva pestaña usando el botón en la esquina superior derecha o verifica si la ventana emergente está bloqueada.' });
     }
   };
 
@@ -149,9 +153,9 @@ export default function ExcelUploader() {
             const rMonth = row['Mes'] || row['MES'] || row['mes'];
             const rYear = row['Año'] || row['AÑO'] || row['Ano'] || row['ANO'] || row['ano'];
             
+            let m = '??';
+            let y = '????';
             if (rMonth || rYear) {
-              let m = '??';
-              let y = '????';
               if (rMonth instanceof Date) m = String(rMonth.getMonth() + 1);
               else if (rMonth) m = String(rMonth).trim().padStart(2, '0').replace(/^0+/, '');
               
@@ -160,6 +164,13 @@ export default function ExcelUploader() {
               
               if (m !== '??' || y !== '????') finalDate = `${m}-${y}`;
             }
+
+            const searchKeywords = [
+              ...normalizeText(fullName).split(/\s+/),
+              fStr.toLowerCase()
+            ];
+            if (y !== '????') searchKeywords.push(y);
+            if (m !== '??' && y !== '????') searchKeywords.push(`${m}-${y}`);
 
             totalRecordsToUpload.push({
               userName: fullName,
@@ -179,10 +190,7 @@ export default function ExcelUploader() {
               nombrePreferencia: keys.pref ? String(row[keys.pref] || '') : '',
               tipoCurso: genData.tipoCurso,
               instructor: genData.instructor,
-              searchKeywords: [
-                ...normalizeText(fullName).split(/\s+/),
-                fStr.toLowerCase()
-              ].filter(w => w.length > 0),
+              searchKeywords: searchKeywords.filter(w => w.length > 0),
               uploadedAt: new Date().toISOString()
             });
           });
@@ -239,13 +247,30 @@ export default function ExcelUploader() {
         </div>
         <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Acceso Restringido</h2>
         <p className="text-slate-500 mb-8 max-w-md text-lg">Para acceder al módulo de carga masiva, por favor inicie sesión con su cuenta institucional.</p>
-        <button
-          onClick={handleLogin}
-          className="px-8 py-4 bg-[#E21F26] hover:bg-[#c41a21] text-white font-black rounded-2xl shadow-lg shadow-red-200 transition-all active:scale-95 flex items-center gap-3 uppercase tracking-wide text-sm"
-        >
-          <LogOut className="w-5 h-5 -scale-x-100" />
-          Iniciar Sesión
-        </button>
+        
+        {status && status.type === 'error' && (
+          <div className="mb-6 bg-rose-50 border border-rose-100 text-rose-700 p-4 rounded-xl text-sm max-w-md">
+            {status.message}
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row gap-4">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-3 uppercase tracking-wide text-sm"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              Volver al Inicio
+            </button>
+          )}
+          <button
+            onClick={handleLogin}
+            className="px-8 py-4 bg-[#E21F26] hover:bg-[#c41a21] text-white font-black rounded-2xl shadow-lg shadow-red-200 transition-all active:scale-95 flex items-center justify-center gap-3 uppercase tracking-wide text-sm"
+          >
+            Iniciar Sesión
+          </button>
+        </div>
       </div>
     );
   }
@@ -258,35 +283,59 @@ export default function ExcelUploader() {
         </div>
         <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Usuario No Autorizado</h2>
         <p className="text-slate-500 mb-8 max-w-md text-lg">La cuenta <span className="font-bold text-slate-700">{user.email}</span> no cuenta con los permisos de administrador necesarios.</p>
-        <button
-          onClick={handleLogout}
-          className="px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-2xl transition-all active:scale-95 flex items-center gap-2 text-sm uppercase tracking-wide"
-        >
-          <LogOut className="w-4 h-4" />
-          Cerrar Sesión
-        </button>
+        
+        <div className="flex flex-col sm:flex-row gap-4">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2 text-sm uppercase tracking-wide"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Volver al Inicio
+            </button>
+          )}
+          <button
+            onClick={handleLogout}
+            className="px-6 py-4 bg-white border-2 border-slate-200 hover:border-slate-300 text-slate-600 font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2 text-sm uppercase tracking-wide"
+          >
+            <LogOut className="w-4 h-4" />
+            Cerrar Sesión
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
-      <div className="flex items-center gap-4 mb-8">
+      <div className="flex flex-col md:flex-row items-center gap-4 mb-8">
         <div className="p-4 bg-red-50 rounded-2xl">
           <FileSpreadsheet className="w-8 h-8 text-[#E21F26]" />
         </div>
-        <div className="flex-1">
+        <div className="flex-1 text-center md:text-left">
           <h2 className="text-2xl font-black text-slate-900">Módulo de Carga</h2>
           <p className="text-slate-500 text-sm font-medium mt-1">Sube archivos Excel (.xls, .xlsx) para sincronizar registros</p>
         </div>
-        <button 
-          onClick={handleLogout}
-          className="p-4 bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-[#E21F26] rounded-2xl transition-all flex items-center gap-2"
-          title="Cerrar sesión"
-        >
-          <LogOut className="w-5 h-5" />
-          <span className="text-xs font-bold uppercase hidden md:inline">Salir</span>
-        </button>
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          {onBack && (
+            <button 
+              onClick={onBack}
+              className="flex-1 md:flex-none justify-center p-4 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-2xl transition-all flex items-center gap-2"
+              title="Volver"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="text-xs font-bold uppercase hidden md:inline">Volver</span>
+            </button>
+          )}
+          <button 
+            onClick={handleLogout}
+            className="flex-1 md:flex-none justify-center p-4 bg-rose-50 hover:bg-rose-100 text-[#E21F26] rounded-2xl transition-all flex items-center gap-2"
+            title="Cerrar sesión"
+          >
+            <LogOut className="w-5 h-5" />
+            <span className="text-xs font-bold uppercase hidden md:inline">Salir</span>
+          </button>
+        </div>
       </div>
 
       <div className="relative group">
