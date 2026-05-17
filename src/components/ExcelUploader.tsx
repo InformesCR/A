@@ -96,9 +96,9 @@ export default function ExcelUploader({ onBack }: Props) {
       }
 
       // ── PASO 2: Primer pase — metadatos generales (hoja GENERAL) ──
-      // Mapa: folio normalizado → { date, tipoCurso, instructor, section }
+      // Mapa: folio normalizado → { date, tipoCurso, instructor, section, periodoImparticion }
       const genDataMap = new Map<string, {
-        date: string; tipoCurso: string; instructor: string; section: string;
+        date: string; tipoCurso: string; instructor: string; section: string; periodoImparticion: string;
       }>();
 
       setLoadingPhase('Analizando datos maestros...');
@@ -134,20 +134,23 @@ export default function ExcelUploader({ onBack }: Props) {
             if (norm) colIdx[norm] = idx;
           });
 
-          const getFolioCol = () => Object.keys(colIdx).find(k => k.includes('folio') && k.includes('informe'));
-          const getAnoCol   = () => Object.keys(colIdx).find(k => k === 'ano' || k === 'año' || k.startsWith('ano'));
-          const getMesCol   = () => Object.keys(colIdx).find(k => k.startsWith('mes'));
-          const getTipoCol  = () => Object.keys(colIdx).find(k => k.includes('linea') || k.includes('gestion') || k.includes('tipo'));
+          const getFolioCol   = () => Object.keys(colIdx).find(k => k.includes('folio') && k.includes('informe'));
+          const getAnoCol     = () => Object.keys(colIdx).find(k => k === 'ano' || k === 'año' || k.startsWith('ano'));
+          const getMesCol     = () => Object.keys(colIdx).find(k => k.startsWith('mes'));
+          const getTipoCol    = () => Object.keys(colIdx).find(k => k.includes('linea') || k.includes('gestion') || k.includes('tipo'));
+          // Columna M: "Día o periodo de impartición"
+          const getPeriodoCol = () => Object.keys(colIdx).find(k => k.includes('periodo') || k.includes('imparticion'));
 
           const folioColName = getFolioCol();
           if (!folioColName) continue;
 
-          const folioCol = colIdx[folioColName];
-          const anoCol   = getAnoCol()   !== undefined ? colIdx[getAnoCol()!]   : -1;
-          const mesCol   = getMesCol()   !== undefined ? colIdx[getMesCol()!]   : -1;
-          const tipoCol  = getTipoCol()  !== undefined ? colIdx[getTipoCol()!]  : -1;
+          const folioCol   = colIdx[folioColName];
+          const anoCol     = getAnoCol()     !== undefined ? colIdx[getAnoCol()!]     : -1;
+          const mesCol     = getMesCol()     !== undefined ? colIdx[getMesCol()!]     : -1;
+          const tipoCol    = getTipoCol()    !== undefined ? colIdx[getTipoCol()!]    : -1;
+          const periodoCol = getPeriodoCol() !== undefined ? colIdx[getPeriodoCol()!] : -1;
 
-          logs.push(`[${name}/${sName}] Encabezado en fila ${headerRowIdx + 1}. Folio@${folioCol}, Año@${anoCol}, Mes@${mesCol}, Tipo@${tipoCol}`);
+          logs.push(`[${name}/${sName}] Encabezado en fila ${headerRowIdx + 1}. Folio@${folioCol}, Año@${anoCol}, Mes@${mesCol}, Tipo@${tipoCol}, Periodo@${periodoCol}`);
 
           // Iterar filas de datos
           for (let ri = headerRowIdx + 1; ri < rawRows.length; ri++) {
@@ -160,10 +163,12 @@ export default function ExcelUploader({ onBack }: Props) {
             const y = anoCol >= 0 ? extractYear(row[anoCol]) : yearFromFolio(folioRaw);
             const date = (m !== '??' || y !== '????') ? `${m}-${y}` : 'N/A';
             const tipoCurso = tipoCol >= 0 ? String(row[tipoCol] || 'N/A').trim() : 'N/A';
+            const periodoImparticion = periodoCol >= 0 ? String(row[periodoCol] || '').trim() : '';
 
             genDataMap.set(fStr, {
               date,
               tipoCurso,
+              periodoImparticion: periodoImparticion || genDataMap.get(fStr)?.periodoImparticion || '',
               instructor: genDataMap.get(fStr)?.instructor || 'N/A',
               section: genDataMap.get(fStr)?.section || 'N/A',
             });
@@ -304,6 +309,7 @@ export default function ExcelUploader({ onBack }: Props) {
               nombrePreferencia:cols.pref       >= 0 ? String(row[cols.pref]       || '').trim()    : '',
               tipoCurso:        genData?.tipoCurso || 'N/A',
               instructor:       genData?.instructor || 'N/A',
+              periodoImparticion: genData?.periodoImparticion || '',
               searchKeywords:   [...new Set(searchKeywords.filter(w => w.length > 0))],
               uploadedAt:       new Date().toISOString(),
             });
