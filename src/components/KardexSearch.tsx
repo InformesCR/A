@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Loader2, Calendar, Filter } from 'lucide-react';
+import { Search, Loader2, Calendar, Filter, X } from 'lucide-react';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db, handleFirestoreError, normalizeText } from '../lib/firebase';
 import { KardexRecord, OperationType } from '../types';
@@ -102,6 +102,14 @@ export default function KardexSearch({ onResults, setLoading, setSearched }: Pro
     }
   };
 
+  const handleClear = () => {
+    setSearchTerm('');
+    setSelectedYear('');
+    setSelectedMonth('');
+    onResults([]);
+    setSearched(false);
+  };
+
   return (
     <div className="bg-white p-8 rounded-[2.5rem] shadow-xl shadow-slate-200/50 border border-slate-100">
       <div className="flex items-center gap-3 mb-6">
@@ -150,13 +158,24 @@ export default function KardexSearch({ onResults, setLoading, setSearched }: Pro
           </div>
         </div>
 
-        <button
-          type="submit"
-          className="w-full md:w-auto px-10 py-5 bg-[#E21F26] hover:bg-[#c41a21] text-white font-black rounded-2xl shadow-xl shadow-red-200 transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-wider mt-2"
-        >
-          <Search className="w-5 h-5" />
-          Realizar Búsqueda
-        </button>
+        <div className="flex gap-3 mt-2">
+          <button
+            type="submit"
+            className="flex-1 md:flex-none px-10 py-5 bg-[#E21F26] hover:bg-[#c41a21] text-white font-black rounded-2xl shadow-xl shadow-red-200 transition-all active:scale-95 flex items-center justify-center gap-2 uppercase tracking-wider"
+          >
+            <Search className="w-5 h-5" />
+            Realizar Búsqueda
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            title="Limpiar búsqueda"
+            className="px-5 py-5 bg-slate-100 hover:bg-slate-200 text-slate-500 font-black rounded-2xl transition-all active:scale-95 flex items-center justify-center gap-2"
+          >
+            <X className="w-5 h-5" />
+            <span className="hidden md:inline text-xs uppercase tracking-wider">Limpiar</span>
+          </button>
+        </div>
       </form>
     </div>
   );
