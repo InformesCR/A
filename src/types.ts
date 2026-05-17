@@ -17,6 +17,7 @@ export interface KardexRecord {
   nombrePreferencia?: string;
   tipoCurso?: string;
   instructor?: string;
+  periodoImparticion?: string;
   searchKeywords?: string[];
   uploadedAt?: string;
 }
