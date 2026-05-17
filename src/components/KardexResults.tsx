@@ -33,6 +33,7 @@ const COLUMN_OPTIONS = [
   { key: 'folioConstancia', label: 'Folio Const.' },
   { key: 'tipoCurso', label: 'Tipo Curso' },
   { key: 'instructor', label: 'Instructor' },
+  { key: 'periodoImparticion', label: 'Periodo' },
 ];
 
 export default function KardexResults({ results, loading, searched }: Props) {
