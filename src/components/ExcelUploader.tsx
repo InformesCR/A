@@ -178,7 +178,8 @@ export default function ExcelUploader({ onBack }: Props) {
         await new Promise(r => setTimeout(r, 20));
       }
 
-      logs.push(`Folios en mapa general: ${genDataMap.size}`);
+      const sampleKeys = [...genDataMap.keys()].slice(0, 5);
+      logs.push(`Folios en mapa general: ${genDataMap.size}. Ejemplos: ${sampleKeys.join(', ')}`);
 
       // ── PASO 3: Segundo pase — registros de alumnos (hoja SOLO PREI u otras) ──
       setLoadingPhase('Extrayendo registros de alumnos...');
@@ -258,6 +259,8 @@ export default function ExcelUploader({ onBack }: Props) {
             if (!folioRaw) continue;
 
             const fStr = folioRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            // Folio visible: conserva guiones y formato original
+            const folioVisible = folioRaw.trim().toUpperCase();
             const nombres  = cols.nombres   >= 0 ? String(row[cols.nombres]   || '').trim() : '';
             const pApe     = cols.pApellido >= 0 ? String(row[cols.pApellido] || '').trim() : '';
             const sApe     = cols.sApellido >= 0 ? String(row[cols.sApellido] || '').trim() : '';
@@ -265,7 +268,8 @@ export default function ExcelUploader({ onBack }: Props) {
             if (!fullName) continue;
 
             // Fecha: prioridad hoja > mapa general > folio
-            const genData = genDataMap.get(fStr);
+            // Lookup en mapa general: intentar con y sin guiones
+            const genData = genDataMap.get(fStr) ?? genDataMap.get(folioVisible.replace(/[^A-Z0-9]/g, ''));
             let m = cols.mes >= 0 ? extractMonth(row[cols.mes]) : '??';
             let y = cols.ano >= 0 ? extractYear(row[cols.ano]) : '????';
             if (m === '??' && genData?.date && genData.date !== 'N/A') m = genData.date.split('-')[0];
@@ -285,15 +289,16 @@ export default function ExcelUploader({ onBack }: Props) {
 
             const searchKeywords = [
               ...normalizeText(fullName).split(/\s+/).filter(w => w.length > 1),
-              fStr.toLowerCase(),
-              folioRaw.trim().toLowerCase(),
+              fStr.toLowerCase(),                          // sin guiones: dgodgo25004
+              folioVisible.toLowerCase(),                  // con guiones: dgo-dgo-25-004
+              normalizeText(folioVisible),                 // normalizado
             ];
             if (y !== '????') searchKeywords.push(y);
             if (m !== '??' && y !== '????') searchKeywords.push(`${m}-${y}`);
 
             totalRecords.push({
               userName:         fullName,
-              folio:            fStr,
+              folio:            folioVisible,
               courseName,
               grade:            cols.grade      >= 0 ? String(row[cols.grade]      || 'N/A').trim() : 'N/A',
               section:          cols.seccion    >= 0 ? String(row[cols.seccion]    || '').trim()    : genData?.section || 'N/A',
@@ -318,7 +323,11 @@ export default function ExcelUploader({ onBack }: Props) {
             if (ri % 500 === 0) await new Promise(r => setTimeout(r, 0));
           }
 
-          logs.push(`[${name}/${sName}] ${sheetCount} registros extraídos.`);
+          const matched = totalRecords.slice(-sheetCount).filter(r => r.tipoCurso !== 'N/A' || r.instructor !== 'N/A' || r.periodoImparticion).length;
+          logs.push(`[${name}/${sName}] ${sheetCount} registros extraídos. ${matched} con datos de hoja GENERAL (tipo/instructor/periodo).`);
+          if (sheetCount > 0 && matched === 0) {
+            logs.push(`⚠️ [${name}/${sName}] Ningún folio de alumnos cruzó con la hoja GENERAL. Verifica que los folios coincidan.`);
+          }
         }
         setProgress(prev => ({ ...prev, current: wi + 1 }));
         await new Promise(r => setTimeout(r, 20));
