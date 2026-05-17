@@ -5,12 +5,51 @@ import KardexResults from './components/KardexResults';
 import { KardexRecord } from './types';
 import { Search, LayoutDashboard, HeartPulse, ShieldCheck, FileText, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { db } from './lib/firebase';
+import { collection, writeBatch } from 'firebase/firestore';
 
 export default function App() {
   const [results, setResults] = useState<KardexRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [view, setView] = useState<'search' | 'upload'>('search');
+
+  const handleSecretClear = async () => {
+    const pwd = window.prompt("¿De verdad desea eliminar las bases de datos? Ingrese la clave para continuar:");
+    if (pwd !== "*******") return;
+
+    if (!window.confirm("¿Está seguro? Esta acción es irreversible.")) return;
+
+    try {
+      setLoading(true);
+      const { getDocs, query } = await import('firebase/firestore');
+      const q = query(collection(db, 'kardex'));
+      const snapshot = await getDocs(q);
+      
+      let deleted = 0;
+      const BATCH_SIZE = 450;
+      let batch = writeBatch(db);
+      
+      for (const docSnapshot of snapshot.docs) {
+        batch.delete(docSnapshot.ref);
+        deleted++;
+        
+        if (deleted % BATCH_SIZE === 0) {
+          await batch.commit();
+          batch = writeBatch(db);
+        }
+      }
+      if (deleted % BATCH_SIZE !== 0) {
+        await batch.commit();
+      }
+      alert(`Se borraron ${deleted} registros exitosamente.`);
+    } catch (error) {
+      console.error(error);
+      alert('Error al borrar la base de datos.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] pb-20 font-sans">
@@ -28,7 +67,12 @@ export default function App() {
                 CRUZ ROJA MEXICANA
               </h1>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black bg-red-50 text-[#E21F26] px-2 py-0.5 rounded-full border border-red-100">DURANGO</span>
+                <span 
+                  onClick={handleSecretClear}
+                  className="text-[10px] font-black bg-red-50 text-[#E21F26] px-2 py-0.5 rounded-full border border-red-100 cursor-pointer"
+                >
+                  DURANGO
+                </span>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden md:block">SISTEMA DE KARDEX</p>
               </div>
             </div>

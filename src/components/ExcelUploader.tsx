@@ -16,43 +16,6 @@ export default function ExcelUploader({ onBack }: Props) {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  const clearDatabase = async () => {
-    if (!window.confirm("¿Está seguro que desea borrar TODOS los registros de la base de datos? Esta acción no se puede deshacer.")) return;
-    
-    setLoading(true);
-    setLoadingPhase('Borrando registros...');
-    setStatus(null);
-    try {
-      const { getDocs, query } = await import('firebase/firestore');
-      const q = query(collection(db, 'kardex'));
-      const snapshot = await getDocs(q);
-      
-      let deleted = 0;
-      const BATCH_SIZE = 450;
-      let batch = writeBatch(db);
-      
-      for (const docSnapshot of snapshot.docs) {
-        batch.delete(docSnapshot.ref);
-        deleted++;
-        
-        if (deleted % BATCH_SIZE === 0) {
-          await batch.commit();
-          batch = writeBatch(db);
-        }
-      }
-      if (deleted % BATCH_SIZE !== 0) {
-        await batch.commit();
-      }
-      
-      setStatus({ type: 'success', message: `Se borraron ${deleted} registros de la base de datos exitosamente.` });
-    } catch (error) {
-      console.error(error);
-      setStatus({ type: 'error', message: 'Error al borrar la base de datos.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const onFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -329,15 +292,6 @@ export default function ExcelUploader({ onBack }: Props) {
               <span className="text-xs font-bold uppercase hidden md:inline">Volver</span>
             </button>
           )}
-          <button 
-            onClick={clearDatabase}
-            disabled={loading}
-            className="flex-1 md:flex-none justify-center p-4 bg-orange-50 hover:bg-orange-100 text-orange-600 rounded-2xl transition-all flex items-center gap-2 disabled:opacity-50"
-            title="Limpiar Base de Datos"
-          >
-            <AlertCircle className="w-5 h-5" />
-            <span className="text-xs font-bold uppercase hidden md:inline">Limpiar DB</span>
-          </button>
         </div>
       </div>
 
