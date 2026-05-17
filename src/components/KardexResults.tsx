@@ -83,11 +83,20 @@ export default function KardexResults({ results, loading, searched }: Props) {
     return true;
   });
 
+  // Cuando hay filtro de persona (edad/cumple), mostrar 1 fila por alumno único
+  const isPersonFilter = filters.age !== 'all';
+
   const recordsByUser = filteredResults.reduce((acc, current) => {
     if (!acc[current.userName]) acc[current.userName] = [];
     acc[current.userName].push(current);
     return acc;
   }, {} as Record<string, KardexRecord[]>);
+
+  // Lista de personas únicas para filtros de edad/cumpleaños
+  // Toma el primer registro de cada alumno como representativo
+  const uniquePersons: KardexRecord[] = isPersonFilter
+    ? Object.values(recordsByUser).map(records => records[0])
+    : [];
 
   const exportToExcel = (userName: string, userRecords: KardexRecord[]) => {
     const data = userRecords.map(r => {
@@ -274,53 +283,98 @@ export default function KardexResults({ results, loading, searched }: Props) {
         <div className="bg-white p-6 rounded-3xl border border-slate-200">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Filtro por Sexo</p>
           <div className="flex gap-2">
-            <button onClick={() => setFilters(p => ({...p, gender: 'female'}))} className={`flex-1 py-3 rounded-2xl border font-bold text-xs transition-all ${filters.gender === 'female' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-100'}`}>MUJERES</button>
-            <button onClick={() => setFilters(p => ({...p, gender: 'male'}))} className={`flex-1 py-3 rounded-2xl border font-bold text-xs transition-all ${filters.gender === 'male' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-100'}`}>HOMBRES</button>
+            <button onClick={() => setFilters(p => ({...p, gender: p.gender === 'female' ? 'all' : 'female'}))} className={`flex-1 py-3 rounded-2xl border font-bold text-xs transition-all ${filters.gender === 'female' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-100'}`}>MUJERES</button>
+            <button onClick={() => setFilters(p => ({...p, gender: p.gender === 'male' ? 'all' : 'male'}))} className={`flex-1 py-3 rounded-2xl border font-bold text-xs transition-all ${filters.gender === 'male' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-100'}`}>HOMBRES</button>
           </div>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-slate-200">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Tipo de Capacitación</p>
           <div className="flex gap-2">
-            <button onClick={() => setFilters(p => ({...p, type: 'curso'}))} className={`flex-1 py-3 rounded-2xl border font-bold text-xs transition-all ${filters.type === 'curso' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-100'}`}>CURSOS</button>
-            <button onClick={() => setFilters(p => ({...p, type: 'taller'}))} className={`flex-1 py-3 rounded-2xl border font-bold text-xs transition-all ${filters.type === 'taller' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-100'}`}>TALLERES</button>
+            <button onClick={() => setFilters(p => ({...p, type: p.type === 'curso' ? 'all' : 'curso'}))} className={`flex-1 py-3 rounded-2xl border font-bold text-xs transition-all ${filters.type === 'curso' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-100'}`}>CURSOS</button>
+            <button onClick={() => setFilters(p => ({...p, type: p.type === 'taller' ? 'all' : 'taller'}))} className={`flex-1 py-3 rounded-2xl border font-bold text-xs transition-all ${filters.type === 'taller' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-100'}`}>TALLERES</button>
           </div>
         </div>
       </div>
 
-      {Object.entries(recordsByUser).map(([user, records]) => (
-        <motion.div key={user} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="bg-slate-50 p-6 border-b border-slate-100 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <UserCircle2 className="w-6 h-6 text-indigo-600" />
-              <h3 className="text-lg font-black text-slate-800 uppercase">{user}</h3>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => exportToExcel(user, records)} className="p-2 hover:bg-slate-200 rounded-xl transition-all"><Download className="w-5 h-5 text-slate-600" /></button>
-              <button onClick={() => exportToPDF(user, records)} className="p-2 hover:bg-slate-200 rounded-xl transition-all"><Printer className="w-5 h-5 text-slate-600" /></button>
-            </div>
+      {isPersonFilter ? (
+        /* ── Vista de personas únicas (filtro por edad / cumpleaños) ── */
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+            <UserCircle2 className="w-5 h-5 text-indigo-600" />
+            <span className="text-xs font-black text-slate-500 uppercase tracking-widest">
+              {uniquePersons.length} persona{uniquePersons.length !== 1 ? 's' : ''} encontrada{uniquePersons.length !== 1 ? 's' : ''}
+            </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50/50">
-                  {COLUMN_OPTIONS.filter(o => visibleColumns.includes(o.key)).map(opt => (
-                    <th key={opt.key} className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{opt.label}</th>
-                  ))}
+                  <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Nombre</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">CURP</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Edad</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Sexo</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">F. Nacimiento</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Cursos tomados</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {records.map((r, i) => (
+                {uniquePersons.map((r, i) => (
                   <tr key={i} className="hover:bg-slate-50/30 transition-colors">
-                    {COLUMN_OPTIONS.filter(o => visibleColumns.includes(o.key)).map(opt => (
-                      <td key={opt.key} className="px-6 py-4 text-sm font-medium text-slate-600">{(r as any)[opt.key]}</td>
-                    ))}
+                    <td className="px-6 py-4 text-sm font-black text-slate-800 uppercase">{r.userName}</td>
+                    <td className="px-6 py-4 text-sm font-mono text-slate-500">{r.curp || '—'}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-slate-600">{r.edad || '—'}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-slate-600">{r.sexo || '—'}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-slate-600">{r.fechaNacimiento || '—'}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-slate-500">
+                      <span className="inline-flex items-center justify-center w-7 h-7 bg-indigo-50 text-indigo-600 rounded-full font-black text-xs">
+                        {recordsByUser[r.userName]?.length ?? 1}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </motion.div>
-      ))}
+      ) : (
+        /* ── Vista normal: todos los cursos por alumno ── */
+        <>
+          {Object.entries(recordsByUser).map(([user, records]) => (
+            <motion.div key={user} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="bg-slate-50 p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <UserCircle2 className="w-6 h-6 text-indigo-600" />
+                  <h3 className="text-lg font-black text-slate-800 uppercase">{user}</h3>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => exportToExcel(user, records)} className="p-2 hover:bg-slate-200 rounded-xl transition-all"><Download className="w-5 h-5 text-slate-600" /></button>
+                  <button onClick={() => exportToPDF(user, records)} className="p-2 hover:bg-slate-200 rounded-xl transition-all"><Printer className="w-5 h-5 text-slate-600" /></button>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50">
+                      {COLUMN_OPTIONS.filter(o => visibleColumns.includes(o.key)).map(opt => (
+                        <th key={opt.key} className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{opt.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {records.map((r, i) => (
+                      <tr key={i} className="hover:bg-slate-50/30 transition-colors">
+                        {COLUMN_OPTIONS.filter(o => visibleColumns.includes(o.key)).map(opt => (
+                          <td key={opt.key} className="px-6 py-4 text-sm font-medium text-slate-600">{(r as any)[opt.key]}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </motion.div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
