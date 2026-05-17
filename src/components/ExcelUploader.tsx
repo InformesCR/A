@@ -67,9 +67,10 @@ export default function ExcelUploader({ onBack }: Props) {
 
           if (!keys.folio) continue;
 
-          data.forEach((row) => {
+          for (let r = 0; r < data.length; r++) {
+            const row = data[r];
             const folioRaw = row[keys.folio!];
-            if (!folioRaw) return;
+            if (!folioRaw) continue;
 
             const fStr = String(folioRaw).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
             const existing = genDataMap.get(fStr) || { date: 'N/A', section: 'N/A', tipoCurso: 'N/A', instructor: 'N/A' };
@@ -106,7 +107,11 @@ export default function ExcelUploader({ onBack }: Props) {
               tipoCurso: String(tipoCurso),
               instructor: String(instructor)
             });
-          });
+
+            if (r % 1000 === 0) {
+              await new Promise(resolve => setTimeout(resolve, 0));
+            }
+          }
         }
         setProgress(prev => ({ ...prev, current: i + 1 }));
         await new Promise(resolve => setTimeout(resolve, 20)); // Yield para refrescar la UI
@@ -145,9 +150,10 @@ export default function ExcelUploader({ onBack }: Props) {
           // Heuristic: If it has folio and nombres, it's a student record sheet
           if (!keys.folio || !keys.nombres) continue;
 
-          rows.forEach((row) => {
+          for (let r = 0; r < rows.length; r++) {
+            const row = rows[r];
             const folio = String(row[keys.folio!] || '');
-            if (!folio) return;
+            if (!folio) continue;
 
             const fStr = folio.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
             const nombres = String(row[keys.nombres!] || '');
@@ -224,7 +230,11 @@ export default function ExcelUploader({ onBack }: Props) {
               searchKeywords: searchKeywords.filter(w => w.length > 0),
               uploadedAt: new Date().toISOString()
             });
-          });
+
+            if (r % 1000 === 0) {
+              await new Promise(resolve => setTimeout(resolve, 0));
+            }
+          }
         }
         setProgress(prev => ({ ...prev, current: i + 1 }));
         await new Promise(resolve => setTimeout(resolve, 20)); // Yield para refrescar la UI
@@ -257,7 +267,11 @@ export default function ExcelUploader({ onBack }: Props) {
           batch.set(docRef, cleanRecord);
         });
 
-        await batch.commit();
+        await Promise.race([
+          batch.commit(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado al conectar con la base de datos (timeout)')), 15000))
+        ]);
+        
         setProgress(prev => ({ ...prev, current: i + chunk.length }));
       }
 
