@@ -10,11 +10,64 @@ interface Props {
   onBack?: () => void;
 }
 
+// ─── Utilidad: encuentra una clave en un objeto por lista de candidatos normalizados ───
+const findKey = (obj: any, candidates: string[]): string | undefined => {
+  if (!obj) return undefined;
+  return Object.keys(obj).find(k => candidates.some(c => normalizeText(k).includes(c)));
+};
+
+// ─── Genera un ID seguro y único para Firestore ───
+const makeDocId = (folio: string, userName: string, courseName: string, date: string): string => {
+  const raw = `${folio}-${normalizeText(userName)}-${normalizeText(courseName)}-${date}`;
+  const safe = raw.replace(/[^a-zA-Z0-9]/g, '').substring(0, 100);
+  return safe || `unknown-${Date.now()}`;
+};
+
+// ─── Extrae año como string "YYYY" desde distintos formatos ───
+const extractYear = (val: any): string => {
+  if (!val) return '????';
+  if (val instanceof Date) return String(val.getFullYear());
+  const s = String(val).trim();
+  if (/^\d{4}$/.test(s)) return s;                    // "2026"
+  if (/^\d{2}$/.test(s)) return `20${s}`;             // "26"
+  const m = s.match(/\b(20\d{2})\b/);
+  if (m) return m[1];
+  return '????';
+};
+
+// ─── Extrae mes como string sin padding (ej. "3", "11") ───
+const MONTH_NAMES: Record<string, string> = {
+  enero:'1', febrero:'2', marzo:'3', abril:'4', mayo:'5', junio:'6',
+  julio:'7', agosto:'8', septiembre:'9', octubre:'10', noviembre:'11', diciembre:'12'
+};
+
+const extractMonth = (val: any): string => {
+  if (!val) return '??';
+  if (val instanceof Date) return String(val.getMonth() + 1);
+  const s = normalizeText(String(val).trim());
+  if (MONTH_NAMES[s]) return MONTH_NAMES[s];           // "MARZO" → "3"
+  const n = parseInt(s);
+  if (!isNaN(n) && n >= 1 && n <= 12) return String(n);
+  return '??';
+};
+
+// ─── Extrae el año desde el folio (ej. "DGO-DGO-26-006" → "2026") ───
+const yearFromFolio = (folio: string): string => {
+  const parts = folio.trim().toUpperCase().split('-');
+  if (parts.length >= 3) {
+    const p = parts[2];
+    if (/^\d{2}$/.test(p)) return `20${p}`;
+    if (/^\d{4}$/.test(p)) return p;
+  }
+  return '????';
+};
+
 export default function ExcelUploader({ onBack }: Props) {
   const [loading, setLoading] = useState(false);
   const [loadingPhase, setLoadingPhase] = useState('');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [diagnostics, setDiagnostics] = useState<string[]>([]);
 
   const onFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -22,263 +75,303 @@ export default function ExcelUploader({ onBack }: Props) {
 
     setLoading(true);
     setStatus(null);
+    setDiagnostics([]);
     setProgress({ current: 0, total: files.length });
     setLoadingPhase('Leyendo archivos...');
 
-    try {
-      const workbooks: XLSX.WorkBook[] = [];
-      const genDataMap = new Map<string, any>();
+    const logs: string[] = [];
 
-      // 1. Read all files into memory once
+    try {
+      // ── PASO 1: Leer todos los archivos en memoria ──
+      const workbooks: { wb: XLSX.WorkBook; name: string }[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const buffer = await file.arrayBuffer();
-        workbooks.push(XLSX.read(buffer, { type: 'array', cellDates: true }));
+        workbooks.push({
+          wb: XLSX.read(buffer, { type: 'array', cellDates: true }),
+          name: file.name
+        });
         setProgress({ current: i + 1, total: files.length });
-        await new Promise(resolve => setTimeout(resolve, 20)); // Yield para refrescar la UI
+        await new Promise(r => setTimeout(r, 20));
       }
 
-      const findKey = (obj: any, candidates: string[]) => {
-        if (!obj) return undefined;
-        return Object.keys(obj).find(k => candidates.includes(normalizeText(k)));
-      };
+      // ── PASO 2: Primer pase — metadatos generales (hoja GENERAL) ──
+      // Mapa: folio normalizado → { date, tipoCurso, instructor, section }
+      const genDataMap = new Map<string, {
+        date: string; tipoCurso: string; instructor: string; section: string;
+      }>();
 
       setLoadingPhase('Analizando datos maestros...');
       setProgress({ current: 0, total: workbooks.length });
 
-      // 2. First pass: Gather metadata (Instructors/Tipo) from ALL sheets in ALL files
-      for (let i = 0; i < workbooks.length; i++) {
-        const workbook = workbooks[i];
-        for (const sName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sName];
-          const data = XLSX.utils.sheet_to_json<any>(sheet);
-          if (data.length === 0) continue;
+      for (let wi = 0; wi < workbooks.length; wi++) {
+        const { wb, name } = workbooks[wi];
+        for (const sName of wb.SheetNames) {
+          const sheet = wb.Sheets[sName];
+          // La hoja GENERAL tiene encabezados en múltiples filas.
+          // Usamos header:1 para leer todas las filas como arrays y buscar
+          // la fila que contiene "FOLIO DE INFORME" manualmente.
+          const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+          if (rawRows.length < 2) continue;
 
-          const keys = {
-            folio: findKey(data[0], ['folio', 'informe', 'no', 'num', 'id', 'a.']),
-            tipo: findKey(data[0], ['tipo de curso', 'c.']),
-            mes: findKey(data[0], ['mes']),
-            year: findKey(data[0], ['año', 'ano']),
-            instructorKeys: Object.keys(data[0]).filter(k => {
-              const nk = normalizeText(k);
-              return nk === 'ec' || nk === 'ed' || nk === 'ee' || nk.includes('instructor');
-            })
-          };
-
-          if (!keys.folio) continue;
-
-          for (let r = 0; r < data.length; r++) {
-            const row = data[r];
-            const folioRaw = row[keys.folio!];
-            if (!folioRaw) continue;
-
-            const fStr = String(folioRaw).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-            const existing = genDataMap.get(fStr) || { date: 'N/A', section: 'N/A', tipoCurso: 'N/A', instructor: 'N/A' };
-            
-            const tipoCurso = keys.tipo ? String(row[keys.tipo] || existing.tipoCurso) : existing.tipoCurso;
-            let instructor = existing.instructor;
-            if (keys.instructorKeys.length > 0) {
-              const names = keys.instructorKeys.map(k => String(row[k] || '').trim()).filter(n => n.length > 2);
-              if (names.length > 0) instructor = names.join(', ');
-            }
-            
-            let m = '??';
-            let y = '????';
-            
-            if (keys.mes && row[keys.mes]) {
-                const rMonth = row[keys.mes];
-                if (rMonth instanceof Date) m = String(rMonth.getMonth() + 1);
-                else m = String(rMonth).trim().padStart(2, '0').replace(/^0+/, '');
-            }
-            if (keys.year && row[keys.year]) {
-                const rYear = row[keys.year];
-                if (rYear instanceof Date) y = String(rYear.getFullYear());
-                else y = String(rYear).trim().split('-')[0];
-            }
-            
-            let date = existing.date;
-            if (m !== '??' || y !== '????') {
-                date = `${m}-${y}`;
-            }
-
-            genDataMap.set(fStr, {
-              date: date !== 'N/A' ? date : existing.date,
-              section: existing.section,
-              tipoCurso: String(tipoCurso),
-              instructor: String(instructor)
-            });
-
-            if (r % 1000 === 0) {
-              await new Promise(resolve => setTimeout(resolve, 0));
+          // Buscar la fila de encabezado real (la que contiene "FOLIO DE INFORME")
+          let headerRowIdx = -1;
+          let headerRow: any[] = [];
+          for (let ri = 0; ri < Math.min(rawRows.length, 10); ri++) {
+            const rowNorm = rawRows[ri].map((c: any) => normalizeText(String(c)));
+            if (rowNorm.some(c => c.includes('folio') && c.includes('informe'))) {
+              headerRowIdx = ri;
+              headerRow = rawRows[ri];
+              break;
             }
           }
+          if (headerRowIdx === -1) continue; // no encontró encabezado
+
+          // Construir mapa de nombre de columna → índice
+          const colIdx: Record<string, number> = {};
+          headerRow.forEach((cell: any, idx: number) => {
+            const norm = normalizeText(String(cell));
+            if (norm) colIdx[norm] = idx;
+          });
+
+          const getFolioCol = () => Object.keys(colIdx).find(k => k.includes('folio') && k.includes('informe'));
+          const getAnoCol   = () => Object.keys(colIdx).find(k => k === 'ano' || k === 'año' || k.startsWith('ano'));
+          const getMesCol   = () => Object.keys(colIdx).find(k => k.startsWith('mes'));
+          const getTipoCol  = () => Object.keys(colIdx).find(k => k.includes('linea') || k.includes('gestion') || k.includes('tipo'));
+
+          const folioColName = getFolioCol();
+          if (!folioColName) continue;
+
+          const folioCol = colIdx[folioColName];
+          const anoCol   = getAnoCol()   !== undefined ? colIdx[getAnoCol()!]   : -1;
+          const mesCol   = getMesCol()   !== undefined ? colIdx[getMesCol()!]   : -1;
+          const tipoCol  = getTipoCol()  !== undefined ? colIdx[getTipoCol()!]  : -1;
+
+          logs.push(`[${name}/${sName}] Encabezado en fila ${headerRowIdx + 1}. Folio@${folioCol}, Año@${anoCol}, Mes@${mesCol}, Tipo@${tipoCol}`);
+
+          // Iterar filas de datos
+          for (let ri = headerRowIdx + 1; ri < rawRows.length; ri++) {
+            const row = rawRows[ri];
+            const folioRaw = String(row[folioCol] || '').trim();
+            if (!folioRaw || folioRaw.toLowerCase() === 'folio de informe') continue;
+
+            const fStr = folioRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const m = mesCol >= 0 ? extractMonth(row[mesCol]) : '??';
+            const y = anoCol >= 0 ? extractYear(row[anoCol]) : yearFromFolio(folioRaw);
+            const date = (m !== '??' || y !== '????') ? `${m}-${y}` : 'N/A';
+            const tipoCurso = tipoCol >= 0 ? String(row[tipoCol] || 'N/A').trim() : 'N/A';
+
+            genDataMap.set(fStr, {
+              date,
+              tipoCurso,
+              instructor: genDataMap.get(fStr)?.instructor || 'N/A',
+              section: genDataMap.get(fStr)?.section || 'N/A',
+            });
+          }
         }
-        setProgress(prev => ({ ...prev, current: i + 1 }));
-        await new Promise(resolve => setTimeout(resolve, 20)); // Yield para refrescar la UI
+        setProgress(prev => ({ ...prev, current: wi + 1 }));
+        await new Promise(r => setTimeout(r, 20));
       }
 
+      logs.push(`Folios en mapa general: ${genDataMap.size}`);
+
+      // ── PASO 3: Segundo pase — registros de alumnos (hoja SOLO PREI u otras) ──
       setLoadingPhase('Extrayendo registros de alumnos...');
       setProgress({ current: 0, total: workbooks.length });
 
-      // 3. Second pass: Gather student records from ALL sheets in ALL files
-      let totalRecordsToUpload: KardexRecord[] = [];
-      for (let i = 0; i < workbooks.length; i++) {
-        const workbook = workbooks[i];
-        for (const sName of workbook.SheetNames) {
-          const sheet = workbook.Sheets[sName];
-          const rows = XLSX.utils.sheet_to_json<any>(sheet);
-          if (rows.length === 0) continue;
+      const totalRecords: KardexRecord[] = [];
 
-          const keys = {
-            folio: findKey(rows[0], ['folio', 'informe', 'id', 'no']),
-            nombres: findKey(rows[0], ['nombre', 'nombres']),
-            pApellido: findKey(rows[0], ['primer apellido', 'apellido paterno', 'paterno']),
-            sApellido: findKey(rows[0], ['segundo apellido', 'apellido materno', 'materno']),
-            curso: findKey(rows[0], ['curso', 'nombre curso', 'capacitacion']),
-            grade: findKey(rows[0], ['calificacion', 'promedio', 'nota']),
-            curp: findKey(rows[0], ['curp']),
-            sexo: findKey(rows[0], ['sexo', 'genero']),
-            edad: findKey(rows[0], ['edad']),
-            nacimiento: findKey(rows[0], ['fecha de nacimiento', 'nacimiento']),
-            semestre: findKey(rows[0], ['semestre', 'nivel']),
-            aprobo: findKey(rows[0], ['aprobo', 'resultado', 'estatus']),
-            folioConst: findKey(rows[0], ['folio constancia', 'num constancia']),
-            interno: findKey(rows[0], ['num interno', 'interno']),
-            pref: findKey(rows[0], ['nombre preferencia', 'alias'])
+      for (let wi = 0; wi < workbooks.length; wi++) {
+        const { wb, name } = workbooks[wi];
+        for (const sName of wb.SheetNames) {
+          const sheet = wb.Sheets[sName];
+          const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+          if (rawRows.length < 2) continue;
+
+          // Buscar la fila con los encabezados de alumnos
+          let headerRowIdx = -1;
+          let headerRow: any[] = [];
+          for (let ri = 0; ri < Math.min(rawRows.length, 10); ri++) {
+            const row = rawRows[ri];
+            const norm = row.map((c: any) => normalizeText(String(c)));
+            const hasFolio   = norm.some(c => c.includes('folio') && c.includes('informe'));
+            const hasNombre  = norm.some(c => c.includes('nombre') && !c.includes('curso') && !c.includes('taller'));
+            if (hasFolio && hasNombre) {
+              headerRowIdx = ri;
+              headerRow = row;
+              break;
+            }
+          }
+          if (headerRowIdx === -1) continue;
+
+          // Mapa columna normalizada → índice
+          const colIdx: Record<string, number> = {};
+          headerRow.forEach((cell: any, idx: number) => {
+            const norm = normalizeText(String(cell));
+            if (norm && !colIdx[norm]) colIdx[norm] = idx;
+          });
+
+          // ── Detectar columnas clave ──
+          const col = (candidates: string[]): number => {
+            const key = Object.keys(colIdx).find(k => candidates.some(c => k.includes(c)));
+            return key !== undefined ? colIdx[key] : -1;
           };
 
-          // Heuristic: If it has folio and nombres, it's a student record sheet
-          if (!keys.folio || !keys.nombres) continue;
+          const cols = {
+            folio:        col(['folio']),
+            nombres:      col(['nombre']),       // "NOMBRE(S)" o "Nombre de Preferencia" — tomamos el primero
+            pApellido:    col(['primer apellido', 'apellido paterno', 'paterno']),
+            sApellido:    col(['segundo apellido', 'apellido materno', 'materno']),
+            curso:        col(['nombre completo del curso', 'nombre del curso', 'curso', 'nombre curso', 'capacitacion']),
+            grade:        col(['calificacion', 'promedio', 'nota']),
+            curp:         col(['curp']),
+            sexo:         col(['sexo', 'genero']),
+            edad:         col(['edad']),
+            nacimiento:   col(['fecha de nacimiento', 'nacimiento']),
+            semestre:     col(['semestre', 'nivel']),
+            aprobo:       col(['aprobo', 'resultado', 'estatus']),
+            folioConst:   col(['folio constancia', 'num constancia']),
+            interno:      col(['numero interno', 'num interno', 'interno']),
+            pref:         col(['nombre de preferencia', 'preferencia', 'alias']),
+            mes:          col(['mes']),
+            ano:          col(['ano', 'año']),
+            seccion:      col(['seccion', 'sección']),
+          };
 
-          for (let r = 0; r < rows.length; r++) {
-            const row = rows[r];
-            const folio = String(row[keys.folio!] || '');
-            if (!folio) continue;
+          // Si no tiene folio ni nombres, esta hoja no es de alumnos
+          if (cols.folio < 0 || cols.nombres < 0) {
+            logs.push(`[${name}/${sName}] Hoja sin columnas de alumnos, omitida.`);
+            continue;
+          }
 
-            const fStr = folio.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-            const nombres = String(row[keys.nombres!] || '');
-            const pApe = keys.pApellido ? String(row[keys.pApellido] || '') : '';
-            const sApe = keys.sApellido ? String(row[keys.sApellido] || '') : '';
-            const fullName = `${nombres} ${pApe} ${sApe}`.trim().replace(/\s+/g, ' ');
+          logs.push(`[${name}/${sName}] Hoja de alumnos detectada. Folio@${cols.folio}, Nombres@${cols.nombres}, Curso@${cols.curso}`);
 
-            const genData = genDataMap.get(fStr) || { date: 'N/A', section: 'N/A', tipoCurso: 'N/A', instructor: 'N/A' };
+          let sheetCount = 0;
+          for (let ri = headerRowIdx + 1; ri < rawRows.length; ri++) {
+            const row = rawRows[ri];
+            const folioRaw = String(row[cols.folio] || '').trim();
+            if (!folioRaw) continue;
 
-            let finalDate = genData.date;
-            const rMonth = row['Mes'] || row['MES'] || row['mes'];
-            const rYear = row['Año'] || row['AÑO'] || row['Ano'] || row['ANO'] || row['ano'];
-            
-            let m = '??';
-            let y = '????';
-            
-            // First try to use genData date if available
-            if (finalDate !== 'N/A') {
-               const parts = finalDate.split('-');
-               if (parts.length === 2) {
-                 m = parts[0];
-                 y = parts[1];
-               }
-            }
+            const fStr = folioRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const nombres  = cols.nombres   >= 0 ? String(row[cols.nombres]   || '').trim() : '';
+            const pApe     = cols.pApellido >= 0 ? String(row[cols.pApellido] || '').trim() : '';
+            const sApe     = cols.sApellido >= 0 ? String(row[cols.sApellido] || '').trim() : '';
+            const fullName = `${nombres} ${pApe} ${sApe}`.replace(/\s+/g, ' ').trim();
+            if (!fullName) continue;
 
-            // Override with current row's date if available
-            if (rMonth || rYear) {
-              if (rMonth instanceof Date) m = String(rMonth.getMonth() + 1);
-              else if (rMonth) m = String(rMonth).trim().padStart(2, '0').replace(/^0+/, '');
-              
-              if (rYear instanceof Date) y = String(rYear.getFullYear());
-              else if (rYear) y = String(rYear).trim().split('-')[0];
-            } else if (y === '????') {
-              // Try to extract year from folio (e.g. DGO-DGO-24-047 -> 24 -> 2024)
-              const parts = folio.trim().toUpperCase().split('-');
-              if (parts.length >= 3) {
-                 const yearPart = parts[2];
-                 if (yearPart.length === 2 && !isNaN(Number(yearPart))) {
-                   y = `20${yearPart}`;
-                 }
-              }
-            }
+            // Fecha: prioridad hoja > mapa general > folio
+            const genData = genDataMap.get(fStr);
+            let m = cols.mes >= 0 ? extractMonth(row[cols.mes]) : '??';
+            let y = cols.ano >= 0 ? extractYear(row[cols.ano]) : '????';
+            if (m === '??' && genData?.date && genData.date !== 'N/A') m = genData.date.split('-')[0];
+            if (y === '????' && genData?.date && genData.date !== 'N/A') y = genData.date.split('-')[1];
+            if (y === '????') y = yearFromFolio(folioRaw);
+            const finalDate = (m !== '??' || y !== '????') ? `${m}-${y}` : 'N/A';
 
-            if (m !== '??' || y !== '????') {
-              finalDate = `${m}-${y}`;
-            }
+            const courseName = cols.curso >= 0
+              ? String(row[cols.curso] || '').trim() || genData?.tipoCurso || 'N/A'
+              : genData?.tipoCurso || 'N/A';
+
+            const fechaNac = cols.nacimiento >= 0
+              ? (row[cols.nacimiento] instanceof Date
+                  ? row[cols.nacimiento].toLocaleDateString('es-MX')
+                  : String(row[cols.nacimiento] || '').trim())
+              : '';
 
             const searchKeywords = [
-              ...normalizeText(fullName).split(/\s+/),
+              ...normalizeText(fullName).split(/\s+/).filter(w => w.length > 1),
               fStr.toLowerCase(),
-              folio.trim().toLowerCase()
+              folioRaw.trim().toLowerCase(),
             ];
             if (y !== '????') searchKeywords.push(y);
             if (m !== '??' && y !== '????') searchKeywords.push(`${m}-${y}`);
 
-            totalRecordsToUpload.push({
-              userName: fullName,
-              folio: fStr,
-              courseName: keys.curso ? String(row[keys.curso] || 'N/A') : 'N/A',
-              grade: keys.grade ? String(row[keys.grade] || 'N/A') : 'N/A',
-              section: genData.section,
-              date: finalDate,
-              curp: keys.curp ? String(row[keys.curp] || '').toUpperCase() : '',
-              sexo: keys.sexo ? String(row[keys.sexo] || '') : '',
-              edad: keys.edad ? String(row[keys.edad] || '') : '',
-              fechaNacimiento: keys.nacimiento ? (row[keys.nacimiento] instanceof Date ? row[keys.nacimiento].toLocaleDateString() : String(row[keys.nacimiento])) : '',
-              semestre: keys.semestre ? String(row[keys.semestre] || '') : '',
-              aprobo: keys.aprobo ? String(row[keys.aprobo] || '') : '',
-              folioConstancia: keys.folioConst ? String(row[keys.folioConst] || '') : '',
-              numInterno: keys.interno ? String(row[keys.interno] || '') : '',
-              nombrePreferencia: keys.pref ? String(row[keys.pref] || '') : '',
-              tipoCurso: genData.tipoCurso,
-              instructor: genData.instructor,
-              searchKeywords: searchKeywords.filter(w => w.length > 0),
-              uploadedAt: new Date().toISOString()
+            totalRecords.push({
+              userName:         fullName,
+              folio:            fStr,
+              courseName,
+              grade:            cols.grade      >= 0 ? String(row[cols.grade]      || 'N/A').trim() : 'N/A',
+              section:          cols.seccion    >= 0 ? String(row[cols.seccion]    || '').trim()    : genData?.section || 'N/A',
+              date:             finalDate,
+              curp:             cols.curp       >= 0 ? String(row[cols.curp]       || '').toUpperCase().trim() : '',
+              sexo:             cols.sexo       >= 0 ? String(row[cols.sexo]       || '').trim()    : '',
+              edad:             cols.edad       >= 0 ? String(row[cols.edad]       || '').trim()    : '',
+              fechaNacimiento:  fechaNac,
+              semestre:         cols.semestre   >= 0 ? String(row[cols.semestre]   || '').trim()    : '',
+              aprobo:           cols.aprobo     >= 0 ? String(row[cols.aprobo]     || '').trim()    : '',
+              folioConstancia:  cols.folioConst >= 0 ? String(row[cols.folioConst] || '').trim()    : '',
+              numInterno:       cols.interno    >= 0 ? String(row[cols.interno]    || '').trim()    : '',
+              nombrePreferencia:cols.pref       >= 0 ? String(row[cols.pref]       || '').trim()    : '',
+              tipoCurso:        genData?.tipoCurso || 'N/A',
+              instructor:       genData?.instructor || 'N/A',
+              searchKeywords:   [...new Set(searchKeywords.filter(w => w.length > 0))],
+              uploadedAt:       new Date().toISOString(),
             });
+            sheetCount++;
 
-            if (r % 1000 === 0) {
-              await new Promise(resolve => setTimeout(resolve, 0));
-            }
+            if (ri % 500 === 0) await new Promise(r => setTimeout(r, 0));
           }
+
+          logs.push(`[${name}/${sName}] ${sheetCount} registros extraídos.`);
         }
-        setProgress(prev => ({ ...prev, current: i + 1 }));
-        await new Promise(resolve => setTimeout(resolve, 20)); // Yield para refrescar la UI
+        setProgress(prev => ({ ...prev, current: wi + 1 }));
+        await new Promise(r => setTimeout(r, 20));
       }
 
-      const total = totalRecordsToUpload.length;
+      const total = totalRecords.length;
+      logs.push(`Total registros a subir: ${total}`);
+      setDiagnostics(logs);
+
       if (total === 0) {
-        setStatus({ type: 'error', message: 'No se encontraron registros válidos para cargar.' });
+        setStatus({
+          type: 'error',
+          message: 'No se encontraron registros válidos. Revisa el diagnóstico abajo para ver qué columnas detectó el sistema.'
+        });
         setLoading(false);
         return;
       }
 
+      // ── PASO 4: Subida por lotes a Firestore ──
       setLoadingPhase('Subiendo registros a Firebase...');
       setProgress({ current: 0, total });
 
-      // 3. Batched upload to Firestore
       const BATCH_SIZE = 450;
+      const TIMEOUT_MS = 30_000; // 30 s por batch
+
       for (let i = 0; i < total; i += BATCH_SIZE) {
         const batch = writeBatch(db);
-        const chunk = totalRecordsToUpload.slice(i, i + BATCH_SIZE);
-        
-        chunk.forEach((record) => {
-          // Create a deterministic ID to avoid duplicates
-          const rawId = `${record.folio}-${record.userName}-${record.courseName}-${record.date}`;
-          const safeId = normalizeText(rawId).replace(/[^a-zA-Z0-9]/g, '');
-          const finalId = safeId.length > 50 ? safeId.substring(0, 50) : safeId || 'unknown-id';
-          
-          const cleanRecord = Object.fromEntries(Object.entries(record).map(([k, v]) => [k, v === undefined ? null : v]));
-          const docRef = doc(db, 'kardex', finalId);
-          batch.set(docRef, cleanRecord);
+        const chunk = totalRecords.slice(i, i + BATCH_SIZE);
+
+        chunk.forEach(record => {
+          const docId = makeDocId(record.folio, record.userName, record.courseName, record.date);
+          const cleanRecord = Object.fromEntries(
+            Object.entries(record).map(([k, v]) => [k, v === undefined ? null : v])
+          );
+          batch.set(doc(db, 'kardex', docId), cleanRecord);
         });
 
         await Promise.race([
           batch.commit(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado al conectar con la base de datos (timeout)')), 15000))
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout en batch ${i / BATCH_SIZE + 1}`)), TIMEOUT_MS)
+          ),
         ]);
-        
+
         setProgress(prev => ({ ...prev, current: i + chunk.length }));
       }
 
-      setStatus({ type: 'success', message: `Se cargaron ${total} registros de ${files.length} archivos exitosamente.` });
-    } catch (err) {
+      setStatus({
+        type: 'success',
+        message: `✅ Se cargaron ${total} registros de ${files.length} archivo(s) exitosamente.`,
+      });
+    } catch (err: any) {
       console.error(err);
-      setStatus({ type: 'error', message: 'Error procesando los archivos.' });
+      const msg = err?.message || 'Error desconocido';
+      setStatus({
+        type: 'error',
+        message: `Error: ${msg}. Revisa el diagnóstico abajo o la consola del navegador (F12).`,
+      });
+      setDiagnostics(prev => [...prev, `ERROR: ${msg}`]);
     } finally {
       setLoading(false);
       e.target.value = '';
@@ -286,8 +379,9 @@ export default function ExcelUploader({ onBack }: Props) {
   }, []);
 
   return (
-    <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100">
-      <div className="flex flex-col md:flex-row items-center gap-4 mb-8">
+    <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row items-center gap-4">
         <div className="p-4 bg-red-50 rounded-2xl">
           <FileSpreadsheet className="w-8 h-8 text-[#E21F26]" />
         </div>
@@ -295,65 +389,85 @@ export default function ExcelUploader({ onBack }: Props) {
           <h2 className="text-2xl font-black text-slate-900">Módulo de Carga</h2>
           <p className="text-slate-500 text-sm font-medium mt-1">Sube archivos Excel (.xls, .xlsx) para sincronizar registros</p>
         </div>
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          {onBack && (
-            <button 
-              onClick={onBack}
-              className="flex-1 md:flex-none justify-center p-4 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-2xl transition-all flex items-center gap-2"
-              title="Volver"
-            >
-              <ArrowLeft className="w-5 h-5" />
-              <span className="text-xs font-bold uppercase hidden md:inline">Volver</span>
-            </button>
-          )}
-        </div>
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="p-4 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-2xl transition-all flex items-center gap-2"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span className="text-xs font-bold uppercase hidden md:inline">Volver</span>
+          </button>
+        )}
       </div>
 
+      {/* Drop zone */}
       <div className="relative group">
         <input
           type="file"
-          accept=".xlsx, .xls"
+          accept=".xlsx,.xls"
           multiple
           onChange={onFileUpload}
           disabled={loading}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed"
         />
-        <div className={`border-2 border-dashed rounded-[2rem] p-12 flex flex-col items-center justify-center transition-all ${loading ? 'bg-slate-50 border-slate-200' : 'border-slate-300 group-hover:border-[#E21F26] group-hover:bg-red-50/50'}`}>
+        <div className={`border-2 border-dashed rounded-[2rem] p-12 flex flex-col items-center justify-center transition-all
+          ${loading ? 'bg-slate-50 border-slate-200' : 'border-slate-300 group-hover:border-[#E21F26] group-hover:bg-red-50/50'}`}>
           {loading ? (
             <div className="flex flex-col items-center w-full">
               <Loader2 className="w-12 h-12 text-[#E21F26] animate-spin mb-6" />
               {progress.total > 0 && (
                 <div className="w-full max-w-sm bg-slate-100 rounded-full h-3 mb-3 overflow-hidden shadow-inner">
-                  <div 
-                    className="bg-[#E21F26] h-full transition-all duration-300 rounded-full" 
+                  <div
+                    className="bg-[#E21F26] h-full transition-all duration-300 rounded-full"
                     style={{ width: `${(progress.current / progress.total) * 100}%` }}
                   />
                 </div>
               )}
+              <p className="font-bold text-slate-700 text-lg text-center">
+                {loadingPhase} {progress.total > 0 ? `${progress.current} / ${progress.total}` : ''}
+              </p>
             </div>
           ) : (
-            <Upload className="w-14 h-14 text-slate-300 group-hover:text-[#E21F26] mb-4 transition-colors group-hover:scale-110 duration-300" />
+            <>
+              <Upload className="w-14 h-14 text-slate-300 group-hover:text-[#E21F26] mb-4 transition-all group-hover:scale-110 duration-300" />
+              <p className="font-bold text-slate-700 text-lg text-center">Selecciona o arrastra archivos Excel aquí</p>
+              <p className="text-sm text-slate-400 mt-2 font-medium">Archivos compatibles: .xlsx y .xls</p>
+            </>
           )}
-          <p className="font-bold text-slate-700 text-lg text-center">
-            {loading 
-              ? progress.total > 0 
-                ? `${loadingPhase} ${progress.current} / ${progress.total}`
-                : loadingPhase || 'Procesando...'
-              : 'Selecciona o arrastra archivos Excel aquí'}
-          </p>
-          <p className="text-sm text-slate-400 mt-2 font-medium">Archivos compatibles: .xlsx y .xls</p>
         </div>
       </div>
 
+      {/* Status */}
       {status && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className={`mt-4 p-4 rounded-2xl flex items-center gap-3 ${status.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'}`}
+          className={`p-4 rounded-2xl flex items-start gap-3
+            ${status.type === 'success'
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+              : 'bg-rose-50 text-rose-700 border border-rose-100'}`}
         >
-          {status.type === 'success' ? <CheckCircle2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+          {status.type === 'success'
+            ? <CheckCircle2 className="w-5 h-5 mt-0.5 shrink-0" />
+            : <AlertCircle  className="w-5 h-5 mt-0.5 shrink-0" />}
           <span className="text-sm font-semibold">{status.message}</span>
         </motion.div>
+      )}
+
+      {/* Diagnóstico (visible siempre que haya logs) */}
+      {diagnostics.length > 0 && (
+        <details className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+          <summary className="text-xs font-black text-slate-500 uppercase tracking-widest cursor-pointer select-none">
+            Diagnóstico de carga ({diagnostics.length} eventos)
+          </summary>
+          <div className="mt-3 space-y-1 max-h-48 overflow-y-auto">
+            {diagnostics.map((log, i) => (
+              <p key={i} className={`text-[11px] font-mono ${log.startsWith('ERROR') ? 'text-red-600' : 'text-slate-500'}`}>
+                {log}
+              </p>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );
