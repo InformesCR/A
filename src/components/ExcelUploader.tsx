@@ -12,6 +12,7 @@ interface Props {
 
 export default function ExcelUploader({ onBack }: Props) {
   const [loading, setLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState('');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -19,6 +20,7 @@ export default function ExcelUploader({ onBack }: Props) {
     if (!window.confirm("¿Está seguro que desea borrar TODOS los registros de la base de datos? Esta acción no se puede deshacer.")) return;
     
     setLoading(true);
+    setLoadingPhase('Borrando registros...');
     setStatus(null);
     try {
       const { getDocs, query } = await import('firebase/firestore');
@@ -57,16 +59,20 @@ export default function ExcelUploader({ onBack }: Props) {
 
     setLoading(true);
     setStatus(null);
-    setProgress({ current: 0, total: 0 });
+    setProgress({ current: 0, total: files.length });
+    setLoadingPhase('Leyendo archivos...');
 
     try {
       const workbooks: XLSX.WorkBook[] = [];
       const genDataMap = new Map<string, any>();
 
       // 1. Read all files into memory once
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         const buffer = await file.arrayBuffer();
         workbooks.push(XLSX.read(buffer, { type: 'array', cellDates: true }));
+        setProgress({ current: i + 1, total: files.length });
+        await new Promise(resolve => setTimeout(resolve, 20)); // Yield para refrescar la UI
       }
 
       const findKey = (obj: any, candidates: string[]) => {
@@ -74,8 +80,12 @@ export default function ExcelUploader({ onBack }: Props) {
         return Object.keys(obj).find(k => candidates.includes(normalizeText(k)));
       };
 
+      setLoadingPhase('Analizando datos maestros...');
+      setProgress({ current: 0, total: workbooks.length });
+
       // 2. First pass: Gather metadata (Instructors/Tipo) from ALL sheets in ALL files
-      for (const workbook of workbooks) {
+      for (let i = 0; i < workbooks.length; i++) {
+        const workbook = workbooks[i];
         for (const sName of workbook.SheetNames) {
           const sheet = workbook.Sheets[sName];
           const data = XLSX.utils.sheet_to_json<any>(sheet);
@@ -135,11 +145,17 @@ export default function ExcelUploader({ onBack }: Props) {
             });
           });
         }
+        setProgress(prev => ({ ...prev, current: i + 1 }));
+        await new Promise(resolve => setTimeout(resolve, 20)); // Yield para refrescar la UI
       }
+
+      setLoadingPhase('Extrayendo registros de alumnos...');
+      setProgress({ current: 0, total: workbooks.length });
 
       // 3. Second pass: Gather student records from ALL sheets in ALL files
       let totalRecordsToUpload: KardexRecord[] = [];
-      for (const workbook of workbooks) {
+      for (let i = 0; i < workbooks.length; i++) {
+        const workbook = workbooks[i];
         for (const sName of workbook.SheetNames) {
           const sheet = workbook.Sheets[sName];
           const rows = XLSX.utils.sheet_to_json<any>(sheet);
@@ -247,6 +263,8 @@ export default function ExcelUploader({ onBack }: Props) {
             });
           });
         }
+        setProgress(prev => ({ ...prev, current: i + 1 }));
+        await new Promise(resolve => setTimeout(resolve, 20)); // Yield para refrescar la UI
       }
 
       const total = totalRecordsToUpload.length;
@@ -256,6 +274,7 @@ export default function ExcelUploader({ onBack }: Props) {
         return;
       }
 
+      setLoadingPhase('Subiendo registros a Firebase...');
       setProgress({ current: 0, total });
 
       // 3. Batched upload to Firestore
@@ -268,10 +287,11 @@ export default function ExcelUploader({ onBack }: Props) {
           // Create a deterministic ID to avoid duplicates
           const rawId = `${record.folio}-${record.userName}-${record.courseName}-${record.date}`;
           const safeId = normalizeText(rawId).replace(/[^a-zA-Z0-9]/g, '');
-          const finalId = safeId.length > 50 ? safeId.substring(0, 50) : safeId;
+          const finalId = safeId.length > 50 ? safeId.substring(0, 50) : safeId || 'unknown-id';
           
+          const cleanRecord = Object.fromEntries(Object.entries(record).map(([k, v]) => [k, v === undefined ? null : v]));
           const docRef = doc(db, 'kardex', finalId);
-          batch.set(docRef, record);
+          batch.set(docRef, cleanRecord);
         });
 
         await batch.commit();
@@ -349,8 +369,8 @@ export default function ExcelUploader({ onBack }: Props) {
           <p className="font-bold text-slate-700 text-lg text-center">
             {loading 
               ? progress.total > 0 
-                ? `Procesando: ${progress.current} / ${progress.total} registros...`
-                : 'Analizando archivos...'
+                ? `${loadingPhase} ${progress.current} / ${progress.total}`
+                : loadingPhase || 'Procesando...'
               : 'Selecciona o arrastra archivos Excel aquí'}
           </p>
           <p className="text-sm text-slate-400 mt-2 font-medium">Archivos compatibles: .xlsx y .xls</p>
