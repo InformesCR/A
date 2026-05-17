@@ -105,10 +105,90 @@ export default function KardexResults({ results, loading, searched }: Props) {
 
   const exportToPDF = (userName: string, userRecords: KardexRecord[]) => {
     const doc = new jsPDF();
-    doc.text(`Kardex del Usuario: ${userName}`, 14, 15);
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+
+    // ── Encabezado — estilo app ──
+    // Fondo blanco ya es default. Franja roja izquierda (ícono simulado)
+    // Cuadro rojo redondeado como ícono de la app
+    doc.setFillColor(226, 31, 38);
+    doc.roundedRect(14, 8, 14, 14, 3, 3, 'F');
+
+    // Cruz / heartbeat: línea horizontal y vertical simples centradas en el cuadro
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(1.8);
+    doc.line(17, 15, 25, 15);   // horizontal
+    doc.line(21, 11, 21, 19);   // vertical
+
+    // Título principal negro, bold, grande — igual que la app
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(15, 15, 15);
+    doc.text('CRUZ ROJA MEXICANA', 33, 14);
+
+    // Badge "DURANGO" — pastilla roja
+    doc.setFillColor(255, 237, 237);
+    doc.setDrawColor(255, 204, 204);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(33, 16.5, 22, 5.5, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(226, 31, 38);
+    doc.text('DURANGO', 44, 20.3, { align: 'center' });
+
+    // "SISTEMA DE KARDEX" en gris pequeño al lado del badge
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(160, 160, 160);
+    doc.text('SISTEMA DE KARDEX', 58, 20.3);
+
+    // Línea separadora
+    doc.setDrawColor(230, 230, 230);
+    doc.setLineWidth(0.4);
+    doc.line(14, 26, pageW - 14, 26);
+
+    // Nombre del alumno
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 30, 30);
+    doc.text(`Kardex del alumno: ${userName}`, 14, 33);
+
+    // ── Tabla ──
     const head = [visibleColumns.map(c => COLUMN_OPTIONS.find(o => o.key === c)?.label || c)];
-    const body = userRecords.map(r => visibleColumns.map(c => (r as any)[c]));
-    (doc as any).autoTable({ head, body, startY: 20 });
+    const body = userRecords.map(r => visibleColumns.map(c => (r as any)[c] ?? ''));
+
+    (doc as any).autoTable({
+      head,
+      body,
+      startY: 37,
+      margin: { left: 14, right: 14 },
+      headStyles: {
+        fillColor: [226, 31, 38],
+        textColor: 255,
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      bodyStyles: {
+        fontSize: 7.5,
+        textColor: [40, 40, 40],
+      },
+      alternateRowStyles: {
+        fillColor: [252, 245, 245],
+      },
+      // ── Pie de página en cada hoja ──
+      didDrawPage: () => {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7);
+        doc.setTextColor(170, 170, 170);
+        doc.text(
+          'Desarrollado por Alexa Calderón Vázquez  ©  2026 Cruz Roja Mexicana Delegación Durango - Área de Capacitación',
+          pageW / 2,
+          pageH - 6,
+          { align: 'center' }
+        );
+      },
+    });
+
     doc.save(`Kardex_${userName}.pdf`);
   };
 
