@@ -108,68 +108,83 @@ export default function ExcelUploader({ onBack }: Props) {
         const { wb, name } = workbooks[wi];
         for (const sName of wb.SheetNames) {
           const sheet = wb.Sheets[sName];
-          // La hoja GENERAL tiene encabezados en múltiples filas.
-          // Usamos header:1 para leer todas las filas como arrays y buscar
-          // la fila que contiene "FOLIO DE INFORME" manualmente.
           const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
           if (rawRows.length < 2) continue;
 
-          // Buscar la fila de encabezado real (la que contiene "FOLIO DE INFORME")
+          // ── Buscar la fila principal de encabezado (contiene "FOLIO DE INFORME") ──
           let headerRowIdx = -1;
-          let headerRow: any[] = [];
           for (let ri = 0; ri < Math.min(rawRows.length, 10); ri++) {
             const rowNorm = rawRows[ri].map((c: any) => normalizeText(String(c)));
             if (rowNorm.some(c => c.includes('folio') && c.includes('informe'))) {
               headerRowIdx = ri;
-              headerRow = rawRows[ri];
               break;
             }
           }
-          if (headerRowIdx === -1) continue; // no encontró encabezado
+          if (headerRowIdx === -1) continue;
 
-          // Construir mapa de nombre de columna → índice
+          // ── Construir mapa combinando TODAS las filas de encabezado (1 hasta headerRowIdx) ──
+          // El Excel tiene encabezados en varias filas fusionadas; combinamos todas.
           const colIdx: Record<string, number> = {};
-          headerRow.forEach((cell: any, idx: number) => {
-            const norm = normalizeText(String(cell));
-            if (norm) colIdx[norm] = idx;
-          });
+          for (let ri = 0; ri <= headerRowIdx; ri++) {
+            rawRows[ri].forEach((cell: any, idx: number) => {
+              const norm = normalizeText(String(cell));
+              if (norm.length > 1 && !colIdx[norm]) colIdx[norm] = idx;
+            });
+          }
 
-          const getFolioCol   = () => Object.keys(colIdx).find(k => k.includes('folio') && k.includes('informe'));
-          const getAnoCol     = () => Object.keys(colIdx).find(k => k === 'ano' || k === 'año' || k.startsWith('ano'));
-          const getMesCol     = () => Object.keys(colIdx).find(k => k.startsWith('mes'));
-          const getTipoCol    = () => Object.keys(colIdx).find(k => k.includes('linea') || k.includes('gestion') || k.includes('tipo'));
-          // Columna M: "Día o periodo de impartición"
-          const getPeriodoCol = () => Object.keys(colIdx).find(k => k.includes('periodo') || k.includes('imparticion'));
+          // ── Detectar columnas por candidatos ──
+          const findCol = (candidates: string[]): number => {
+            const key = Object.keys(colIdx).find(k => candidates.some(c => k.includes(c)));
+            return key !== undefined ? colIdx[key] : -1;
+          };
 
-          const folioColName = getFolioCol();
-          if (!folioColName) continue;
+          const folioCol   = findCol(['folio']);
+          if (folioCol < 0) continue;
 
-          const folioCol   = colIdx[folioColName];
-          const anoCol     = getAnoCol()     !== undefined ? colIdx[getAnoCol()!]     : -1;
-          const mesCol     = getMesCol()     !== undefined ? colIdx[getMesCol()!]     : -1;
-          const tipoCol    = getTipoCol()    !== undefined ? colIdx[getTipoCol()!]    : -1;
-          const periodoCol = getPeriodoCol() !== undefined ? colIdx[getPeriodoCol()!] : -1;
+          const anoCol     = findCol(['ano']);
+          const mesCol     = findCol(['mes']);
+          const tipoCol    = findCol(['linea', 'gestion', 'inclusion']);
+          const periodoCol = findCol(['periodo', 'imparticion', 'dia o']);
+          // Instructor: puede estar como "nombre(s)" dentro de sección de instructores
+          // Buscar columna que tenga "nombre" Y esté después de la columna 100 (zona instructores)
+          const instructorCol = (() => {
+            const candidates = Object.keys(colIdx).filter(k =>
+              (k.includes('nombre') || k.includes('primer apellido')) && colIdx[k] > 50
+            );
+            return candidates.length > 0 ? colIdx[candidates[0]] : -1;
+          })();
 
-          logs.push(`[${name}/${sName}] Encabezado en fila ${headerRowIdx + 1}. Folio@${folioCol}, Año@${anoCol}, Mes@${mesCol}, Tipo@${tipoCol}, Periodo@${periodoCol}`);
+          logs.push(`[${name}/${sName}] GENERAL: Folio@${folioCol}, Año@${anoCol}, Mes@${mesCol}, Tipo@${tipoCol}, Periodo@${periodoCol}, Instructor@${instructorCol}`);
 
-          // Iterar filas de datos
+          // ── Iterar filas de datos ──
           for (let ri = headerRowIdx + 1; ri < rawRows.length; ri++) {
             const row = rawRows[ri];
             const folioRaw = String(row[folioCol] || '').trim();
-            if (!folioRaw || folioRaw.toLowerCase() === 'folio de informe') continue;
+            if (!folioRaw || normalizeText(folioRaw).includes('folio')) continue;
 
             const fStr = folioRaw.toUpperCase().replace(/[^A-Z0-9]/g, '');
             const m = mesCol >= 0 ? extractMonth(row[mesCol]) : '??';
             const y = anoCol >= 0 ? extractYear(row[anoCol]) : yearFromFolio(folioRaw);
             const date = (m !== '??' || y !== '????') ? `${m}-${y}` : 'N/A';
-            const tipoCurso = tipoCol >= 0 ? String(row[tipoCol] || 'N/A').trim() : 'N/A';
+            const tipoCurso = tipoCol >= 0 ? String(row[tipoCol] || '').trim() || 'N/A' : 'N/A';
             const periodoImparticion = periodoCol >= 0 ? String(row[periodoCol] || '').trim() : '';
+
+            // Instructor: buscar apellidos y nombre en columnas de instructores
+            let instructor = genDataMap.get(fStr)?.instructor || '';
+            if (instructorCol >= 0) {
+              // Tomar apellido1, apellido2, nombre desde columnas consecutivas al instructorCol
+              const ap1  = String(row[instructorCol]     || '').trim();
+              const ap2  = String(row[instructorCol + 1] || '').trim();
+              const nom  = String(row[instructorCol + 2] || '').trim();
+              const full = [nom, ap1, ap2].filter(Boolean).join(' ');
+              if (full.length > 2) instructor = full;
+            }
 
             genDataMap.set(fStr, {
               date,
               tipoCurso,
               periodoImparticion: periodoImparticion || genDataMap.get(fStr)?.periodoImparticion || '',
-              instructor: genDataMap.get(fStr)?.instructor || 'N/A',
+              instructor: instructor || 'N/A',
               section: genDataMap.get(fStr)?.section || 'N/A',
             });
           }
